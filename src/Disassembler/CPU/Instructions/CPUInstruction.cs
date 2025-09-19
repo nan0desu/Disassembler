@@ -8,6 +8,7 @@ namespace Disassembler.CPU
 		private uint uiLinearAddress = 0;
 		private ushort usSegment = 0;
 		private ushort usOffset = 0;
+		private int instructionOrdinal = -1;
 
 		private CPUTypeEnum eCPUType = CPUTypeEnum.Undefined;
 		private CPUInstructionEnum eInstruction = CPUInstructionEnum.Undefined;
@@ -30,6 +31,7 @@ namespace Disassembler.CPU
 		// this instruction location is referenced by jump
 		private bool bLabel = false;
 		private int labelOrdinal = -1;
+		private int referenceCount = 0;
 
 		// prefixes
 		private bool bLockPrefix = false;
@@ -41,12 +43,12 @@ namespace Disassembler.CPU
 		private CPUFlagsEnum eModifiedFlags = CPUFlagsEnum.Undefined;
 		private CPUFlagsEnum eUndefinedFlags = CPUFlagsEnum.Undefined;
 
-		public CPUInstruction(ushort segment, ushort offset, CPUInstructionEnum instructiontype, CPUParameterSizeEnum size)
+		public CPUInstruction(ushort segment, ushort offset, CPUInstructionEnum instructionType, CPUParameterSizeEnum size)
 		{
 			this.uiLinearAddress = MainProgram.ToLinearAddress(segment, offset);
 			this.usSegment = segment;
 			this.usOffset = offset;
-			this.eInstruction = instructiontype;
+			this.eInstruction = instructionType;
 			this.eDefaultSize = size;
 			this.eOperandSize = size;
 			this.eAddressSize = size;
@@ -59,6 +61,22 @@ namespace Disassembler.CPU
 			this.usOffset = offset;
 
 			DecodeInstruction(stream);
+		}
+
+		public CPUInstruction(int ordinal, CPUInstructionEnum instructionType, CPUParameterSizeEnum size)
+		{
+			this.instructionOrdinal = ordinal;
+			this.eInstruction = InstructionType;
+			this.eDefaultSize = size;
+			this.eOperandSize = size;
+			this.eAddressSize = size;
+		}
+
+		public CPUInstruction(int ordinal, string remark)
+		{
+			this.instructionOrdinal = ordinal;
+			this.eInstruction = CPUInstructionEnum.Remark;
+			this.sDescription = remark;
 		}
 
 		public void DecodeInstruction(MemoryStream stream)
@@ -120,6 +138,8 @@ namespace Disassembler.CPU
 			}
 		}
 
+		public int InstructionOrdinal { get => this.instructionOrdinal; set => this.instructionOrdinal = value; }
+
 		public CPUTypeEnum CPUType
 		{
 			get
@@ -173,13 +193,7 @@ namespace Disassembler.CPU
 			}
 		}
 
-		public string Description
-		{
-			get
-			{
-				return this.sDescription;
-			}
-		}
+		public string Description { get => this.sDescription; set => this.sDescription = value; }
 
 		public bool Invalid
 		{
@@ -223,6 +237,12 @@ namespace Disassembler.CPU
 		{
 			get { return this.labelOrdinal; }
 			set { this.labelOrdinal = value; }
+		}
+
+		public int ReferenceCount
+		{
+			get { return this.referenceCount; }
+			set { this.referenceCount = value; }
 		}
 
 		public string LabelName
@@ -1052,6 +1072,11 @@ namespace Disassembler.CPU
 					sbValue.AppendFormat("J{0} {1}", this.aParameters[0].ToString(), this.aParameters[1].ToString());
 					break;
 
+				case CPUInstructionEnum.IIf:
+					sbValue.AppendFormat("MOV {0}, (({1}) ? {2} : {3})", this.aParameters[0].ToString(), this.aParameters[1].ToString(),
+						this.aParameters[2].ToString(), this.aParameters[3].ToString());
+					break;
+
 				case CPUInstructionEnum.JCXZ:
 					sbValue.AppendFormat("JCXZ {0}", this.aParameters[0].ToString());
 					break;
@@ -1350,6 +1375,10 @@ namespace Disassembler.CPU
 
 				case CPUInstructionEnum.XOR:
 					sbValue.AppendFormat("XOR {0}, {1}", this.aParameters[0].ToString(), this.aParameters[1].ToString());
+					break;
+
+				case CPUInstructionEnum.Remark:
+					sbValue.Append($"// {this.sDescription}");
 					break;
 
 				case CPUInstructionEnum.SWITCH:

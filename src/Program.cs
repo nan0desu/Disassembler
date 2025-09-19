@@ -34,7 +34,7 @@ internal class Program
 		// process Main code
 		Console.WriteLine("Loading EXE");
 
-		MZExecutable mainEXE = new(string.Format("..{0}..{0}..{0}..{0}..{0}..{0}Civilization Games{0}Civ I{0}Dos{0}CIV{1}.EXE", 
+		MZExecutable mainEXE = new(string.Format("..{0}..{0}..{0}..{0}..{0}..{0}Games{0}Civilization{0}Civ I{0}Dos{0}CIV{1}.EXE", 
 			Path.DirectorySeparatorChar, version));
 
 		int baseAddress = mainEXE.InitialCS * 16;
@@ -622,7 +622,7 @@ internal class Program
 
 		// Emit flow graphs
 		uint ilSegment = 0x181;
-		ushort ilFunction = 0x14a;
+		ushort ilFunction = 0x136;
 
 		if (mainProgram.Segments.ContainsKey(ilSegment))
 		{

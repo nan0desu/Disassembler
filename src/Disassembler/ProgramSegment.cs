@@ -73,7 +73,15 @@ namespace Disassembler
 				writer.WriteLine("{");
 				writer.WriteLine("\tpublic class {0}", className);
 				writer.WriteLine("\t{");
-				writer.WriteLine($"\t\t// Segment 0x{this.CPUSegment:x}");
+				if (this.CPUOverlay == 0)
+				{
+					writer.WriteLine($"\t\t// Segment 0x{this.CPUSegment:x}");
+				}
+				else
+				{
+					writer.WriteLine($"\t\t// Overlay 0x{this.CPUOverlay:x}");
+				}
+
 				writer.WriteLine("\t\tprivate Civilization oParent;");
 				writer.WriteLine("\t\tprivate CPU oCPU;");
 				writer.WriteLine();

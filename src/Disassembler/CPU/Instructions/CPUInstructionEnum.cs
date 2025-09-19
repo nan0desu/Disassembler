@@ -193,6 +193,8 @@
 		XLAT,
 		XOR,
 		// syntetic instructions - not real instructions, just synonyms
+		Remark,
+		IIf,
 		SWITCH,
 		WordsToDword,
 		CallOverlay
