@@ -1950,7 +1950,21 @@ namespace Disassembler
 								}
 								else
 								{
-									throw new Exception($"CALL parameter type '{parameter0.Type}' not implemented");
+									// Indirect near call — target is computed from register or memory
+									ILExpression targetExpr = ParameterToIL(localSegments, localRegisters, parameter0);
+									List<ILExpression> parameterList = [];
+
+									while (localStack.Count > 0)
+									{
+										parameterList.Add(localStack.Pop());
+									}
+
+									node.ILInstructions.Add(new ILIndirectFunctionCall(targetExpr, parameterList, false));
+
+									ClearCachedRegister(cachedRegisters, CPURegisterEnum.AX);
+									ClearCachedRegister(cachedRegisters, CPURegisterEnum.BX);
+									ClearCachedRegister(cachedRegisters, CPURegisterEnum.CX);
+									ClearCachedRegister(cachedRegisters, CPURegisterEnum.DX);
 								}
 								break;
 
@@ -2022,7 +2036,22 @@ namespace Disassembler
 								}
 								else
 								{
-									throw new Exception("Indirect function call not implemented");
+									// Indirect far call — target is computed from memory
+									ILExpression targetExpr = ParameterToIL(localSegments, localRegisters, parameter0);
+									List<ILExpression> parameterList = [];
+
+									while (localStack.Count > 0)
+									{
+										parameterList.Add(localStack.Pop());
+									}
+
+									node.ILInstructions.Add(new ILIndirectFunctionCall(targetExpr, parameterList, true));
+
+									// Indirect calls clobber all caller-saved registers
+									ClearCachedRegister(cachedRegisters, CPURegisterEnum.AX);
+									ClearCachedRegister(cachedRegisters, CPURegisterEnum.BX);
+									ClearCachedRegister(cachedRegisters, CPURegisterEnum.CX);
+									ClearCachedRegister(cachedRegisters, CPURegisterEnum.DX);
 								}
 								break;
 

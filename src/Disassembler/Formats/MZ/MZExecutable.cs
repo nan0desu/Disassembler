@@ -285,7 +285,7 @@
 		/// This function relocates all segments with relation to loading segment
 		/// </summary>
 		/// <param name="loadingSegment"></param>
-		/*public void ApplyRelocations(ushort loadingSegment)
+		public void ApplyRelocations(ushort loadingSegment)
 		{
 			this.initialCS += loadingSegment;
 			this.initialSS += loadingSegment;
@@ -312,7 +312,7 @@
 					overlay.WriteUInt16(dataPosition, newCS);
 				}
 			}
-		}*/
+		}
 
 		#region Helper functions
 		public static byte ReadByte(Stream stream)
