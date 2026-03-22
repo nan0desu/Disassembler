@@ -1759,8 +1759,9 @@ namespace Disassembler
 								if (parameter0.Type == CPUParameterTypeEnum.Register)
 								{
 									register = parameter0.RegisterValue;
+									ILValueType destType = parentFunction.ParentSegment.ParentProgram.FromCPUParameterSizeEnum(parameter0.Size);
 									parentFunction.LocalVariables.Add(parentFunction.LocalVariablePosition, new ILVariable(parentFunction,
-										this.parentFunction.ParentSegment.ParentProgram.IntValueType, parentFunction.LocalVariablePosition));
+										destType, parentFunction.LocalVariablePosition));
 									variable = new ILLocalVariableReference(parentFunction, parentFunction.LocalVariablePosition);
 
 									if (localRegisters.ContainsKey(register))
@@ -1772,7 +1773,11 @@ namespace Disassembler
 										localRegisters.Add(register, variable);
 									}
 
-									node.ILInstructions.Add(new ILAssignment(variable, ParameterToIL(localSegments, localRegisters, instruction.Parameters[1])));
+									ILExpression sourceExpr = ParameterToIL(localSegments, localRegisters, instruction.Parameters[1]);
+									bool isSigned = instruction.InstructionType == CPUInstructionEnum.MOVSX;
+									ILExpression castExpr = new ILTypeCast(sourceExpr, destType, isSigned);
+
+									node.ILInstructions.Add(new ILAssignment(variable, castExpr));
 
 									parentFunction.LocalVariablePosition += 2;
 								}
