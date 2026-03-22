@@ -2345,6 +2345,40 @@ namespace Disassembler
 			}
 		}
 
+		private static ILExpression GetRegisterExpr(BDictionary<CPURegisterEnum, ILExpression> localRegisters, CPURegisterEnum reg)
+		{
+			if (localRegisters.ContainsKey(reg))
+			{
+				return localRegisters.GetValueByKey(reg);
+			}
+
+			throw new Exception($"Use of an undefined local register '{reg}' in memory addressing");
+		}
+
+		private ILExpression ResolveMemoryAddress(ProgramSegment? segment,
+			BDictionary<CPURegisterEnum, ILExpression> localRegisters, ILValueType memType,
+			ILExpression? baseExpr, ILExpression? indexExpr, int displacement, bool hasDisplacement)
+		{
+			if (segment != null)
+			{
+				return new ILMemoryReference(segment, memType, baseExpr, indexExpr, displacement, hasDisplacement);
+			}
+
+			// SS segment (stack-relative) — build an address expression
+			// This would typically be a local variable or parameter access via BP
+			ILExpression addr = baseExpr!;
+			if (indexExpr != null)
+			{
+				addr = new ILOperator(addr, ILOperatorEnum.Add, indexExpr);
+			}
+			if (hasDisplacement && displacement != 0)
+			{
+				addr = new ILOperator(addr, ILOperatorEnum.Add,
+					new ILImmediateValue(this.parentFunction.ParentSegment.ParentProgram.FromCPUParameterSizeEnum(CPUParameterSizeEnum.UInt16), (uint)displacement));
+			}
+			return addr;
+		}
+
 		private ILExpression ParameterToIL(BDictionary<CPUSegmentRegisterEnum, uint> localSegments,
 			BDictionary<CPURegisterEnum, ILExpression> localRegisters, CPUParameter parameter)
 		{
@@ -2386,8 +2420,13 @@ namespace Disassembler
 					return new ILLocalVariableReference(parentFunction, (int)parameter.Displacement);
 
 				case CPUParameterTypeEnum.MemoryAddress:
+				{
+					ILValueType memType = parentFunction.ParentSegment.ParentProgram.FromCPUParameterSizeEnum(parameter.Size);
+
 					if (parameter.DataSegment == CPUSegmentRegisterEnum.SS)
 					{
+						// SS-relative addressing — BP-based modes are local variables/parameters
+						// Non-BP modes on SS are unusual and not supported
 						switch (parameter.Value)
 						{
 							case 0: // [BX + SI]
@@ -2396,13 +2435,11 @@ namespace Disassembler
 							case 5: // [DI]
 							case 6: // [{0}]
 							case 7: // [BX]
-
 							case 8: // [{0} + BX + SI]
 							case 9: // [{0} + BX + DI]
 							case 12: // [{0} + SI]
 							case 13: // [{0} + DI]
 							case 15: // [{0} + BX]
-
 							case 16: // [{0} + BX + SI]
 							case 17: // [{0} + BX + DI]
 							case 20: // [{0} + SI]
@@ -2411,26 +2448,39 @@ namespace Disassembler
 								throw new Exception($"The addressing type {parameter} is not supported on segment {parameter.DataSegment}");
 
 							case 2: // [BP + SI]
-								break;
 							case 3: // [BP + DI]
-								break;
+								return ResolveMemoryAddress(null, localRegisters, memType,
+									GetRegisterExpr(localRegisters, CPURegisterEnum.BP),
+									GetRegisterExpr(localRegisters, (parameter.Value & 1) == 0 ? CPURegisterEnum.SI : CPURegisterEnum.DI),
+									0, false);
 
-							case 10: // [BP {0} + SI]
-								break;
-							case 11: // [BP {0} + DI]
-								break;
-							case 14: // [BP {0}]
-								break;
+							case 10: // [BP + disp8 + SI]
+							case 11: // [BP + disp8 + DI]
+								return ResolveMemoryAddress(null, localRegisters, memType,
+									GetRegisterExpr(localRegisters, CPURegisterEnum.BP),
+									GetRegisterExpr(localRegisters, (parameter.Value & 1) == 0 ? CPURegisterEnum.SI : CPURegisterEnum.DI),
+									parameter.Displacement, true);
 
-							case 18: // [BP {0} + SI]
-								break;
-							case 19: // [BP {0} + DI]
-								break;
-							case 22: // [BP {0}]
-								break;
+							case 14: // [BP + disp8]
+								return ResolveMemoryAddress(null, localRegisters, memType,
+									GetRegisterExpr(localRegisters, CPURegisterEnum.BP), null,
+									parameter.Displacement, true);
+
+							case 18: // [BP + disp16 + SI]
+							case 19: // [BP + disp16 + DI]
+								return ResolveMemoryAddress(null, localRegisters, memType,
+									GetRegisterExpr(localRegisters, CPURegisterEnum.BP),
+									GetRegisterExpr(localRegisters, (parameter.Value & 1) == 0 ? CPURegisterEnum.SI : CPURegisterEnum.DI),
+									parameter.Displacement, true);
+
+							case 22: // [BP + disp16]
+								return ResolveMemoryAddress(null, localRegisters, memType,
+									GetRegisterExpr(localRegisters, CPURegisterEnum.BP), null,
+									parameter.Displacement, true);
+
+							default:
+								throw new Exception($"Unknown SS addressing mode {parameter.Value}");
 						}
-
-						throw new Exception("Not implemented");
 					}
 					else
 					{
@@ -2439,62 +2489,88 @@ namespace Disassembler
 							throw new Exception($"The segment '{parameter.DataSegment}' is not defined");
 						}
 
-						ProgramSegment segment = parentFunction.ParentSegment.ParentProgram.FindOrCreateSegment(parentFunction.ParentSegment.CPUOverlay, (ushort)localSegments.GetValueByKey(parameter.DataSegment));
+						ProgramSegment segment = parentFunction.ParentSegment.ParentProgram.FindOrCreateSegment(
+							parentFunction.ParentSegment.CPUOverlay, (ushort)localSegments.GetValueByKey(parameter.DataSegment));
 
+						// BP-relative modes don't make sense on data segments
 						switch (parameter.Value)
 						{
 							case 2: // [BP + SI]
 							case 3: // [BP + DI]
-
-							case 10: // [BP {0} + SI]
-							case 11: // [BP {0} + DI]
-							case 14: // [BP {0}]
-
-							case 18: // [BP {0} + SI]
-							case 19: // [BP {0} + DI]
-							case 22: // [BP {0}]
+							case 10: // [BP + disp8 + SI]
+							case 11: // [BP + disp8 + DI]
+							case 14: // [BP + disp8]
+							case 18: // [BP + disp16 + SI]
+							case 19: // [BP + disp16 + DI]
+							case 22: // [BP + disp16]
 								throw new Exception($"The addressing type {parameter} is not supported on segment {parameter.DataSegment}");
 
-							case 0: // [BX + SI]
-								break;
-							case 1: // [BX + DI]
-								break;
-							case 4: // [SI]
-								break;
-							case 5: // [DI]
-								break;
-							case 6: // [{0}]
+							case 6: // [disp16] — direct address
 								segment.GetOrDefineGlobalVariable(parameter.Size, parameter.Displacement);
 								return new ILGlobalVariableReference(segment, parameter.Displacement);
+
+							case 0: // [BX + SI]
+							case 1: // [BX + DI]
+								return ResolveMemoryAddress(segment, localRegisters, memType,
+									GetRegisterExpr(localRegisters, CPURegisterEnum.BX),
+									GetRegisterExpr(localRegisters, (parameter.Value & 1) == 0 ? CPURegisterEnum.SI : CPURegisterEnum.DI),
+									0, false);
+
+							case 4: // [SI]
+								return ResolveMemoryAddress(segment, localRegisters, memType,
+									GetRegisterExpr(localRegisters, CPURegisterEnum.SI), null, 0, false);
+
+							case 5: // [DI]
+								return ResolveMemoryAddress(segment, localRegisters, memType,
+									GetRegisterExpr(localRegisters, CPURegisterEnum.DI), null, 0, false);
+
 							case 7: // [BX]
-								break;
+								return ResolveMemoryAddress(segment, localRegisters, memType,
+									GetRegisterExpr(localRegisters, CPURegisterEnum.BX), null, 0, false);
 
-							case 8: // [{0} + BX + SI]
-								break;
-							case 9: // [{0} + BX + DI]
-								break;
-							case 12: // [{0} + SI]
-								break;
-							case 13: // [{0} + DI]
-								break;
-							case 15: // [{0} + BX]
-								break;
+							case 8: // [disp8 + BX + SI]
+							case 9: // [disp8 + BX + DI]
+								return ResolveMemoryAddress(segment, localRegisters, memType,
+									GetRegisterExpr(localRegisters, CPURegisterEnum.BX),
+									GetRegisterExpr(localRegisters, (parameter.Value & 1) == 0 ? CPURegisterEnum.SI : CPURegisterEnum.DI),
+									parameter.Displacement, true);
 
-							case 16: // [{0} + BX + SI]
-								break;
-							case 17: // [{0} + BX + DI]
-								break;
-							case 20: // [{0} + SI]
-								break;
-							case 21: // [{0} + DI]
-								break;
-							case 23: // [{0} + BX]
-								break;
+							case 12: // [disp8 + SI]
+								return ResolveMemoryAddress(segment, localRegisters, memType,
+									GetRegisterExpr(localRegisters, CPURegisterEnum.SI), null, parameter.Displacement, true);
+
+							case 13: // [disp8 + DI]
+								return ResolveMemoryAddress(segment, localRegisters, memType,
+									GetRegisterExpr(localRegisters, CPURegisterEnum.DI), null, parameter.Displacement, true);
+
+							case 15: // [disp8 + BX]
+								return ResolveMemoryAddress(segment, localRegisters, memType,
+									GetRegisterExpr(localRegisters, CPURegisterEnum.BX), null, parameter.Displacement, true);
+
+							case 16: // [disp16 + BX + SI]
+							case 17: // [disp16 + BX + DI]
+								return ResolveMemoryAddress(segment, localRegisters, memType,
+									GetRegisterExpr(localRegisters, CPURegisterEnum.BX),
+									GetRegisterExpr(localRegisters, (parameter.Value & 1) == 0 ? CPURegisterEnum.SI : CPURegisterEnum.DI),
+									parameter.Displacement, true);
+
+							case 20: // [disp16 + SI]
+								return ResolveMemoryAddress(segment, localRegisters, memType,
+									GetRegisterExpr(localRegisters, CPURegisterEnum.SI), null, parameter.Displacement, true);
+
+							case 21: // [disp16 + DI]
+								return ResolveMemoryAddress(segment, localRegisters, memType,
+									GetRegisterExpr(localRegisters, CPURegisterEnum.DI), null, parameter.Displacement, true);
+
+							case 23: // [disp16 + BX]
+								return ResolveMemoryAddress(segment, localRegisters, memType,
+									GetRegisterExpr(localRegisters, CPURegisterEnum.BX), null, parameter.Displacement, true);
+
+							default:
+								throw new Exception($"Unknown addressing mode {parameter.Value}");
 						}
-
-						throw new Exception("Not implemented");
 					}
-
+				}
 				default:
 					throw new Exception($"Parameter type '{parameter.Type}' not implemented");
 			}
