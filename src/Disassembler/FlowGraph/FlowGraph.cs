@@ -1305,6 +1305,11 @@ namespace Disassembler
 					// cache and aggregate register values before commiting them to more permanent local or global variables
 					BDictionary<CPURegisterEnum, int> cachedRegisters = [];
 
+					// pending comparison state for CMP/TEST -> Jcc translation
+					ILExpression? pendingCompareLeft = null;
+					ILExpression? pendingCompareRight = null;
+					int pendingCompareType = 0; // 0 = CMP, 1 = TEST
+
 					#region Translate Assembly instructions to IL
 
 					for (int i = 0; i < node.AsmInstructions.Count; i++)
@@ -1365,6 +1370,237 @@ namespace Disassembler
 								}
 								break;
 
+							case CPUInstructionEnum.ADD:
+							case CPUInstructionEnum.ADC:
+								parameter0 = instruction.Parameters[0];
+								parameter1 = instruction.Parameters[1];
+
+								if (parameter0.Type == CPUParameterTypeEnum.Register)
+								{
+									register = parameter0.RegisterValue;
+
+									if (localRegisters.ContainsKey(register) && cachedRegisters.ContainsKey(register))
+									{
+										ILExpression oldValue = localRegisters.GetValueByKey(register);
+										ILExpression newValue = new ILOperator(oldValue, ILOperatorEnum.Add, ParameterToIL(localSegments, localRegisters, parameter1));
+
+										localRegisters.SetValueByKey(register, newValue);
+									}
+									else
+									{
+										throw new Exception($"Use of a undefined local register '{register}'");
+									}
+								}
+								else
+								{
+									throw new Exception($"Parameter type '{parameter0.Type}' not implemented");
+								}
+								break;
+
+							case CPUInstructionEnum.AND:
+								parameter0 = instruction.Parameters[0];
+								parameter1 = instruction.Parameters[1];
+
+								if (parameter0.Type == CPUParameterTypeEnum.Register)
+								{
+									register = parameter0.RegisterValue;
+
+									if (localRegisters.ContainsKey(register) && cachedRegisters.ContainsKey(register))
+									{
+										ILExpression oldValue = localRegisters.GetValueByKey(register);
+										ILExpression newValue = new ILOperator(oldValue, ILOperatorEnum.BitwiseAnd, ParameterToIL(localSegments, localRegisters, parameter1));
+
+										localRegisters.SetValueByKey(register, newValue);
+									}
+									else
+									{
+										throw new Exception($"Use of a undefined local register '{register}'");
+									}
+								}
+								else
+								{
+									throw new Exception($"Parameter type '{parameter0.Type}' not implemented");
+								}
+								break;
+
+							case CPUInstructionEnum.OR:
+								parameter0 = instruction.Parameters[0];
+								parameter1 = instruction.Parameters[1];
+
+								if (parameter0.Type == CPUParameterTypeEnum.Register)
+								{
+									register = parameter0.RegisterValue;
+
+									if (localRegisters.ContainsKey(register) && cachedRegisters.ContainsKey(register))
+									{
+										ILExpression oldValue = localRegisters.GetValueByKey(register);
+										ILExpression newValue = new ILOperator(oldValue, ILOperatorEnum.BitwiseOr, ParameterToIL(localSegments, localRegisters, parameter1));
+
+										localRegisters.SetValueByKey(register, newValue);
+									}
+									else
+									{
+										throw new Exception($"Use of a undefined local register '{register}'");
+									}
+								}
+								else
+								{
+									throw new Exception($"Parameter type '{parameter0.Type}' not implemented");
+								}
+								break;
+
+							case CPUInstructionEnum.XOR:
+								parameter0 = instruction.Parameters[0];
+								parameter1 = instruction.Parameters[1];
+
+								if (parameter0.Type == CPUParameterTypeEnum.Register)
+								{
+									if (parameter0.Type == parameter1.Type && parameter0.Value == parameter1.Value)
+									{
+										// XOR reg, reg is a zero idiom
+										register = parameter0.RegisterValue;
+										ClearCachedRegister(cachedRegisters, register);
+
+										ILExpression newValue = new ILImmediateValue(parentFunction.ParentSegment.ParentProgram.FromCPUParameterSizeEnum(parameter0.Size), 0);
+
+										if (localRegisters.ContainsKey(register))
+										{
+											localRegisters.SetValueByKey(register, newValue);
+										}
+										else
+										{
+											localRegisters.Add(register, newValue);
+										}
+
+										cachedRegisters.Add(register, node.ILInstructions.Count);
+									}
+									else
+									{
+										register = parameter0.RegisterValue;
+
+										if (localRegisters.ContainsKey(register) && cachedRegisters.ContainsKey(register))
+										{
+											ILExpression oldValue = localRegisters.GetValueByKey(register);
+											ILExpression newValue = new ILOperator(oldValue, ILOperatorEnum.BitwiseXor, ParameterToIL(localSegments, localRegisters, parameter1));
+
+											localRegisters.SetValueByKey(register, newValue);
+										}
+										else
+										{
+											throw new Exception($"Use of a undefined local register '{register}'");
+										}
+									}
+								}
+								else
+								{
+									throw new Exception($"Parameter type '{parameter0.Type}' not implemented");
+								}
+								break;
+
+							case CPUInstructionEnum.SHL:
+								parameter0 = instruction.Parameters[0];
+								parameter1 = instruction.Parameters[1];
+
+								if (parameter0.Type == CPUParameterTypeEnum.Register)
+								{
+									register = parameter0.RegisterValue;
+
+									if (localRegisters.ContainsKey(register) && cachedRegisters.ContainsKey(register))
+									{
+										ILExpression oldValue = localRegisters.GetValueByKey(register);
+										ILExpression newValue = new ILOperator(oldValue, ILOperatorEnum.ShiftLeft, ParameterToIL(localSegments, localRegisters, parameter1));
+
+										localRegisters.SetValueByKey(register, newValue);
+									}
+									else
+									{
+										throw new Exception($"Use of a undefined local register '{register}'");
+									}
+								}
+								else
+								{
+									throw new Exception($"Parameter type '{parameter0.Type}' not implemented");
+								}
+								break;
+
+							case CPUInstructionEnum.SHR:
+								parameter0 = instruction.Parameters[0];
+								parameter1 = instruction.Parameters[1];
+
+								if (parameter0.Type == CPUParameterTypeEnum.Register)
+								{
+									register = parameter0.RegisterValue;
+
+									if (localRegisters.ContainsKey(register) && cachedRegisters.ContainsKey(register))
+									{
+										ILExpression oldValue = localRegisters.GetValueByKey(register);
+										ILExpression newValue = new ILOperator(oldValue, ILOperatorEnum.ShiftRight, ParameterToIL(localSegments, localRegisters, parameter1));
+
+										localRegisters.SetValueByKey(register, newValue);
+									}
+									else
+									{
+										throw new Exception($"Use of a undefined local register '{register}'");
+									}
+								}
+								else
+								{
+									throw new Exception($"Parameter type '{parameter0.Type}' not implemented");
+								}
+								break;
+
+							case CPUInstructionEnum.SAR:
+								parameter0 = instruction.Parameters[0];
+								parameter1 = instruction.Parameters[1];
+
+								if (parameter0.Type == CPUParameterTypeEnum.Register)
+								{
+									register = parameter0.RegisterValue;
+
+									if (localRegisters.ContainsKey(register) && cachedRegisters.ContainsKey(register))
+									{
+										ILExpression oldValue = localRegisters.GetValueByKey(register);
+										ILExpression newValue = new ILOperator(oldValue, ILOperatorEnum.ArithmeticShiftRight, ParameterToIL(localSegments, localRegisters, parameter1));
+
+										localRegisters.SetValueByKey(register, newValue);
+									}
+									else
+									{
+										throw new Exception($"Use of a undefined local register '{register}'");
+									}
+								}
+								else
+								{
+									throw new Exception($"Parameter type '{parameter0.Type}' not implemented");
+								}
+								break;
+
+							case CPUInstructionEnum.SBB:
+								parameter0 = instruction.Parameters[0];
+								parameter1 = instruction.Parameters[1];
+
+								if (parameter0.Type == CPUParameterTypeEnum.Register)
+								{
+									register = parameter0.RegisterValue;
+
+									if (localRegisters.ContainsKey(register) && cachedRegisters.ContainsKey(register))
+									{
+										ILExpression oldValue = localRegisters.GetValueByKey(register);
+										ILExpression newValue = new ILOperator(oldValue, ILOperatorEnum.Substract, ParameterToIL(localSegments, localRegisters, parameter1));
+
+										localRegisters.SetValueByKey(register, newValue);
+									}
+									else
+									{
+										throw new Exception($"Use of a undefined local register '{register}'");
+									}
+								}
+								else
+								{
+									throw new Exception($"Parameter type '{parameter0.Type}' not implemented");
+								}
+								break;
+
 							case CPUInstructionEnum.INC:
 								parameter0 = instruction.Parameters[0];
 								switch (parameter0.Type)
@@ -1385,6 +1621,74 @@ namespace Disassembler
 									default:
 										throw new Exception($"Parameter type '{parameter0.Type}' not implemented");
 								}
+								break;
+
+							case CPUInstructionEnum.DEC:
+								parameter0 = instruction.Parameters[0];
+								switch (parameter0.Type)
+								{
+									case CPUParameterTypeEnum.Register:
+										register = parameter0.RegisterValue;
+
+										if (localRegisters.ContainsKey(register))
+										{
+											node.ILInstructions.Add(new ILUnaryAssignmentOperator(localRegisters.GetValueByKey(register), ILUnaryOperatorEnum.DecrementAfter));
+										}
+										else
+										{
+											throw new Exception($"Use of a undefined local register '{register}'");
+										}
+										break;
+
+									default:
+										throw new Exception($"Parameter type '{parameter0.Type}' not implemented");
+								}
+								break;
+
+							case CPUInstructionEnum.NEG:
+								parameter0 = instruction.Parameters[0];
+								if (parameter0.Type == CPUParameterTypeEnum.Register)
+								{
+									register = parameter0.RegisterValue;
+
+									if (localRegisters.ContainsKey(register) && cachedRegisters.ContainsKey(register))
+									{
+										node.ILInstructions.Add(new ILUnaryAssignmentOperator(localRegisters.GetValueByKey(register), ILUnaryOperatorEnum.Negate));
+									}
+									else
+									{
+										throw new Exception($"Use of a undefined local register '{register}'");
+									}
+								}
+								else
+								{
+									throw new Exception($"Parameter type '{parameter0.Type}' not implemented");
+								}
+								break;
+
+							case CPUInstructionEnum.NOT:
+								parameter0 = instruction.Parameters[0];
+								if (parameter0.Type == CPUParameterTypeEnum.Register)
+								{
+									register = parameter0.RegisterValue;
+
+									if (localRegisters.ContainsKey(register) && cachedRegisters.ContainsKey(register))
+									{
+										node.ILInstructions.Add(new ILUnaryAssignmentOperator(localRegisters.GetValueByKey(register), ILUnaryOperatorEnum.BitwiseNot));
+									}
+									else
+									{
+										throw new Exception($"Use of a undefined local register '{register}'");
+									}
+								}
+								else
+								{
+									throw new Exception($"Parameter type '{parameter0.Type}' not implemented");
+								}
+								break;
+
+							case CPUInstructionEnum.NOP:
+								// no operation
 								break;
 
 							case CPUInstructionEnum.MOV:
@@ -1417,8 +1721,232 @@ namespace Disassembler
 								}
 								break;
 
-							case CPUInstructionEnum.PUSH:
-								localStack.Push(ParameterToIL(localSegments, localRegisters, instruction.Parameters[0]));
+							case CPUInstructionEnum.LEA:
+								parameter0 = instruction.Parameters[0];
+								parameter1 = instruction.Parameters[1];
+
+								if (parameter0.Type == CPUParameterTypeEnum.Register)
+								{
+									register = parameter0.RegisterValue;
+									parentFunction.LocalVariables.Add(parentFunction.LocalVariablePosition, new ILVariable(parentFunction,
+										this.parentFunction.ParentSegment.ParentProgram.IntValueType, parentFunction.LocalVariablePosition));
+									variable = new ILLocalVariableReference(parentFunction, parentFunction.LocalVariablePosition);
+
+									if (localRegisters.ContainsKey(register))
+									{
+										localRegisters.SetValueByKey(register, variable);
+									}
+									else
+									{
+										localRegisters.Add(register, variable);
+									}
+
+									// LEA loads the effective address, not the value at the address
+									node.ILInstructions.Add(new ILAssignment(variable, ParameterToIL(localSegments, localRegisters, parameter1)));
+
+									parentFunction.LocalVariablePosition += 2;
+								}
+								else
+								{
+									throw new Exception($"Parameter type '{parameter0.Type}' not implemented");
+								}
+								break;
+
+							case CPUInstructionEnum.MOVZX:
+							case CPUInstructionEnum.MOVSX:
+								parameter0 = instruction.Parameters[0];
+
+								if (parameter0.Type == CPUParameterTypeEnum.Register)
+								{
+									register = parameter0.RegisterValue;
+									parentFunction.LocalVariables.Add(parentFunction.LocalVariablePosition, new ILVariable(parentFunction,
+										this.parentFunction.ParentSegment.ParentProgram.IntValueType, parentFunction.LocalVariablePosition));
+									variable = new ILLocalVariableReference(parentFunction, parentFunction.LocalVariablePosition);
+
+									if (localRegisters.ContainsKey(register))
+									{
+										localRegisters.SetValueByKey(register, variable);
+									}
+									else
+									{
+										localRegisters.Add(register, variable);
+									}
+
+									node.ILInstructions.Add(new ILAssignment(variable, ParameterToIL(localSegments, localRegisters, instruction.Parameters[1])));
+
+									parentFunction.LocalVariablePosition += 2;
+								}
+								else
+								{
+									throw new Exception($"Parameter type '{parameter0.Type}' not implemented");
+								}
+								break;
+
+							case CPUInstructionEnum.XCHG:
+								parameter0 = instruction.Parameters[0];
+								parameter1 = instruction.Parameters[1];
+
+								if (parameter0.Type == CPUParameterTypeEnum.Register && parameter1.Type == CPUParameterTypeEnum.Register)
+								{
+									CPURegisterEnum reg0 = parameter0.RegisterValue;
+									CPURegisterEnum reg1 = parameter1.RegisterValue;
+
+									if (localRegisters.ContainsKey(reg0) && localRegisters.ContainsKey(reg1))
+									{
+										ILExpression temp = localRegisters.GetValueByKey(reg0);
+										localRegisters.SetValueByKey(reg0, localRegisters.GetValueByKey(reg1));
+										localRegisters.SetValueByKey(reg1, temp);
+									}
+									else
+									{
+										throw new Exception($"Use of a undefined local register in XCHG");
+									}
+								}
+								else
+								{
+									throw new Exception($"XCHG parameter type not implemented");
+								}
+								break;
+
+							case CPUInstructionEnum.CBW:
+								// sign-extend AL to AX — treat as MOV AX, (signed)AL
+								if (localRegisters.ContainsKey(CPURegisterEnum.AX))
+								{
+									// CBW is implicit, the value in AX is already tracked
+									// In IL terms, this is a sign extension cast — no-op for now
+								}
+								break;
+
+							case CPUInstructionEnum.CWD:
+								// sign-extend AX to DX:AX
+								if (localRegisters.ContainsKey(CPURegisterEnum.AX))
+								{
+									// Set DX based on sign of AX — for IL purposes, track DX as dependent on AX
+									ILExpression axValue = localRegisters.GetValueByKey(CPURegisterEnum.AX);
+									// DX gets the sign extension (0x0000 or 0xFFFF)
+									ILExpression dxValue = new ILOperator(axValue, ILOperatorEnum.ArithmeticShiftRight,
+										new ILImmediateValue(parentFunction.ParentSegment.ParentProgram.FromCPUParameterSizeEnum(CPUParameterSizeEnum.UInt16), 15));
+
+									if (localRegisters.ContainsKey(CPURegisterEnum.DX))
+									{
+										localRegisters.SetValueByKey(CPURegisterEnum.DX, dxValue);
+									}
+									else
+									{
+										localRegisters.Add(CPURegisterEnum.DX, dxValue);
+									}
+
+									if (!cachedRegisters.ContainsKey(CPURegisterEnum.DX))
+									{
+										cachedRegisters.Add(CPURegisterEnum.DX, node.ILInstructions.Count);
+									}
+								}
+								break;
+
+							case CPUInstructionEnum.CMP:
+								parameter0 = instruction.Parameters[0];
+								parameter1 = instruction.Parameters[1];
+
+								// Store the pending comparison operands for use by the next Jcc
+								pendingCompareLeft = ParameterToIL(localSegments, localRegisters, parameter0);
+								pendingCompareRight = ParameterToIL(localSegments, localRegisters, parameter1);
+								pendingCompareType = 0; // CMP
+								break;
+
+							case CPUInstructionEnum.TEST:
+								parameter0 = instruction.Parameters[0];
+								parameter1 = instruction.Parameters[1];
+
+								// Store the pending test operands for use by the next Jcc
+								pendingCompareLeft = ParameterToIL(localSegments, localRegisters, parameter0);
+								pendingCompareRight = ParameterToIL(localSegments, localRegisters, parameter1);
+								pendingCompareType = 1; // TEST
+								break;
+
+							case CPUInstructionEnum.Jcc:
+								// Conditional jump — translate to ILConditionExpression using pending CMP/TEST
+								if (pendingCompareLeft != null && pendingCompareRight != null)
+								{
+									parameter0 = instruction.Parameters[0]; // condition code
+									ILConditionEnum condEnum = ConditionCodeToILCondition((byte)parameter0.Value, pendingCompareType);
+									node.ILInstructions.Add(new ILConditionExpression(pendingCompareLeft, condEnum, pendingCompareRight));
+									pendingCompareLeft = null;
+									pendingCompareRight = null;
+								}
+								else
+								{
+									throw new Exception("Jcc without preceding CMP/TEST");
+								}
+								break;
+
+							case CPUInstructionEnum.JMP:
+							case CPUInstructionEnum.JMPF:
+								// Unconditional jumps are handled by FlowGraph edges
+								break;
+
+							case CPUInstructionEnum.CALL:
+								parameter0 = instruction.Parameters[0];
+
+								if (parameter0.Type == CPUParameterTypeEnum.Immediate)
+								{
+									function = parentFunction.ParentSegment.ParentProgram.FindFunction(0, (ushort)parentFunction.ParentSegment.Segment, (ushort)parameter0.Value);
+
+									if (function != null)
+									{
+										if ((function.FunctionOptions & ProgramFunctionOptionsEnum.Cdecl) == ProgramFunctionOptionsEnum.Cdecl)
+										{
+											if (i + 1 >= node.AsmInstructions.Count)
+											{
+												List<ILExpression> parameterList = [];
+												while (localStack.Count > 0)
+												{
+													parameterList.Add(localStack.Pop());
+												}
+												node.ILInstructions.Add(new ILFunctionCall(function, parameterList));
+											}
+											else if ((instruction = node.AsmInstructions[i + 1]).InstructionType == CPUInstructionEnum.ADD &&
+												instruction.OperandSize == CPUParameterSizeEnum.UInt16 &&
+												instruction.Parameters.Count == 2 &&
+												instruction.Parameters[0].Type == CPUParameterTypeEnum.Register &&
+												instruction.Parameters[0].Value == (uint)CPURegisterEnum.SP &&
+												instruction.Parameters[1].Type == CPUParameterTypeEnum.Immediate)
+											{
+												if (instruction.Parameters[1].Value == function.ParameterSize)
+												{
+													List<ILExpression> parameterList = [];
+													for (int j = 0; j < function.Parameters.Count; j++)
+													{
+														parameterList.Add(localStack.Pop());
+													}
+													node.ILInstructions.Add(new ILFunctionCall(function, parameterList));
+													i++;
+												}
+												else
+												{
+													throw new Exception($"The function '{function.ParentSegment.Name}.{function.Name}' " +
+														$"accepts {function.Parameters.Count} parameters, but {(instruction.Parameters[1].Value / 2)} parameters passed");
+												}
+											}
+
+											ClearCachedRegister(cachedRegisters, CPURegisterEnum.AX);
+											ClearCachedRegister(cachedRegisters, CPURegisterEnum.BX);
+											ClearCachedRegister(cachedRegisters, CPURegisterEnum.CX);
+											ClearCachedRegister(cachedRegisters, CPURegisterEnum.DX);
+										}
+										else
+										{
+											throw new Exception($"Unsupported function call type '{function.FunctionOptions}'");
+										}
+									}
+									else
+									{
+										throw new Exception($"Can't find the function at {parentFunction.ParentSegment.Segment:x}:0x{parameter0.Value:x}");
+									}
+								}
+								else
+								{
+									throw new Exception($"CALL parameter type '{parameter0.Type}' not implemented");
+								}
 								break;
 
 							case CPUInstructionEnum.CALLF:
@@ -1477,10 +2005,6 @@ namespace Disassembler
 											ClearCachedRegister(cachedRegisters, CPURegisterEnum.CX);
 											ClearCachedRegister(cachedRegisters, CPURegisterEnum.DX);
 										}
-										else if ((function.FunctionOptions & ProgramFunctionOptionsEnum.Pascal) == ProgramFunctionOptionsEnum.Pascal)
-										{
-											throw new Exception("Pascal function call not implemented");
-										}
 										else
 										{
 											throw new Exception($"Unsupported function call type '{function.FunctionOptions}'");
@@ -1495,6 +2019,262 @@ namespace Disassembler
 								{
 									throw new Exception("Indirect function call not implemented");
 								}
+								break;
+
+							case CPUInstructionEnum.RET:
+							case CPUInstructionEnum.RETF:
+								// Return is handled by FlowGraph structure (end node)
+								break;
+
+							case CPUInstructionEnum.LOOP:
+							case CPUInstructionEnum.LOOPE:
+							case CPUInstructionEnum.LOOPNE:
+								// LOOP decrements CX and jumps if CX != 0
+								// Control flow is handled by FlowGraph edges
+								if (localRegisters.ContainsKey(CPURegisterEnum.CX))
+								{
+									node.ILInstructions.Add(new ILUnaryAssignmentOperator(localRegisters.GetValueByKey(CPURegisterEnum.CX), ILUnaryOperatorEnum.DecrementAfter));
+								}
+								break;
+
+							case CPUInstructionEnum.PUSH:
+								localStack.Push(ParameterToIL(localSegments, localRegisters, instruction.Parameters[0]));
+								break;
+
+							case CPUInstructionEnum.POP:
+								parameter0 = instruction.Parameters[0];
+								if (parameter0.Type == CPUParameterTypeEnum.Register)
+								{
+									register = parameter0.RegisterValue;
+
+									if (localStack.Count > 0)
+									{
+										ILExpression poppedValue = localStack.Pop();
+
+										if (localRegisters.ContainsKey(register))
+										{
+											localRegisters.SetValueByKey(register, poppedValue);
+										}
+										else
+										{
+											localRegisters.Add(register, poppedValue);
+										}
+
+										if (!cachedRegisters.ContainsKey(register))
+										{
+											cachedRegisters.Add(register, node.ILInstructions.Count);
+										}
+									}
+									else
+									{
+										throw new Exception($"POP with empty local stack for register '{register}'");
+									}
+								}
+								else
+								{
+									throw new Exception($"POP parameter type '{parameter0.Type}' not implemented");
+								}
+								break;
+
+							case CPUInstructionEnum.PUSHF:
+							case CPUInstructionEnum.POPF:
+							case CPUInstructionEnum.PUSHA:
+							case CPUInstructionEnum.POPA:
+								// Flag and register save/restore — skip for IL translation
+								break;
+
+							case CPUInstructionEnum.MUL:
+								// Unsigned multiply: DX:AX = AX * operand
+								parameter0 = instruction.Parameters[0];
+								{
+									ILExpression mulOperand = ParameterToIL(localSegments, localRegisters, parameter0);
+
+									if (localRegisters.ContainsKey(CPURegisterEnum.AX) && cachedRegisters.ContainsKey(CPURegisterEnum.AX))
+									{
+										ILExpression axValue = localRegisters.GetValueByKey(CPURegisterEnum.AX);
+										ILExpression result = new ILOperator(axValue, ILOperatorEnum.Multiply, mulOperand);
+
+										localRegisters.SetValueByKey(CPURegisterEnum.AX, result);
+
+										// DX gets the high word — approximate as 0 for single-precision results
+										if (localRegisters.ContainsKey(CPURegisterEnum.DX))
+										{
+											localRegisters.SetValueByKey(CPURegisterEnum.DX,
+												new ILImmediateValue(parentFunction.ParentSegment.ParentProgram.FromCPUParameterSizeEnum(CPUParameterSizeEnum.UInt16), 0));
+										}
+									}
+									else
+									{
+										throw new Exception($"Use of a undefined local register 'AX' in MUL");
+									}
+								}
+								break;
+
+							case CPUInstructionEnum.IMUL:
+								// Signed multiply
+								parameter0 = instruction.Parameters[0];
+								if (instruction.Parameters.Count == 1)
+								{
+									// Single operand: DX:AX = AX * operand
+									ILExpression mulOperand = ParameterToIL(localSegments, localRegisters, parameter0);
+
+									if (localRegisters.ContainsKey(CPURegisterEnum.AX) && cachedRegisters.ContainsKey(CPURegisterEnum.AX))
+									{
+										ILExpression axValue = localRegisters.GetValueByKey(CPURegisterEnum.AX);
+										ILExpression result = new ILOperator(axValue, ILOperatorEnum.Multiply, mulOperand);
+
+										localRegisters.SetValueByKey(CPURegisterEnum.AX, result);
+
+										if (localRegisters.ContainsKey(CPURegisterEnum.DX))
+										{
+											localRegisters.SetValueByKey(CPURegisterEnum.DX,
+												new ILImmediateValue(parentFunction.ParentSegment.ParentProgram.FromCPUParameterSizeEnum(CPUParameterSizeEnum.UInt16), 0));
+										}
+									}
+									else
+									{
+										throw new Exception($"Use of a undefined local register 'AX' in IMUL");
+									}
+								}
+								else if (instruction.Parameters.Count >= 2)
+								{
+									// Two/three operand form: dest = src * imm
+									parameter1 = instruction.Parameters[1];
+									if (parameter0.Type == CPUParameterTypeEnum.Register)
+									{
+										register = parameter0.RegisterValue;
+										ILExpression src = ParameterToIL(localSegments, localRegisters, parameter1);
+										ILExpression imm = instruction.Parameters.Count == 3
+											? ParameterToIL(localSegments, localRegisters, instruction.Parameters[2])
+											: src;
+
+										ILExpression result = instruction.Parameters.Count == 3
+											? new ILOperator(src, ILOperatorEnum.Multiply, imm)
+											: new ILOperator(localRegisters.GetValueByKey(register), ILOperatorEnum.Multiply, src);
+
+										localRegisters.SetValueByKey(register, result);
+									}
+									else
+									{
+										throw new Exception($"IMUL parameter type '{parameter0.Type}' not implemented");
+									}
+								}
+								break;
+
+							case CPUInstructionEnum.DIV:
+								// Unsigned divide: AX = DX:AX / operand, DX = DX:AX % operand
+								parameter0 = instruction.Parameters[0];
+								{
+									ILExpression divOperand = ParameterToIL(localSegments, localRegisters, parameter0);
+
+									if (localRegisters.ContainsKey(CPURegisterEnum.AX) && cachedRegisters.ContainsKey(CPURegisterEnum.AX))
+									{
+										ILExpression axValue = localRegisters.GetValueByKey(CPURegisterEnum.AX);
+										ILExpression quotient = new ILOperator(axValue, ILOperatorEnum.Divide, divOperand);
+										ILExpression remainder = new ILOperator(axValue, ILOperatorEnum.Modulo, divOperand);
+
+										localRegisters.SetValueByKey(CPURegisterEnum.AX, quotient);
+
+										if (localRegisters.ContainsKey(CPURegisterEnum.DX))
+										{
+											localRegisters.SetValueByKey(CPURegisterEnum.DX, remainder);
+										}
+										else
+										{
+											localRegisters.Add(CPURegisterEnum.DX, remainder);
+										}
+
+										if (!cachedRegisters.ContainsKey(CPURegisterEnum.DX))
+										{
+											cachedRegisters.Add(CPURegisterEnum.DX, node.ILInstructions.Count);
+										}
+									}
+									else
+									{
+										throw new Exception($"Use of a undefined local register 'AX' in DIV");
+									}
+								}
+								break;
+
+							case CPUInstructionEnum.IDIV:
+								// Signed divide: AX = DX:AX / operand, DX = DX:AX % operand
+								parameter0 = instruction.Parameters[0];
+								{
+									ILExpression divOperand = ParameterToIL(localSegments, localRegisters, parameter0);
+
+									if (localRegisters.ContainsKey(CPURegisterEnum.AX) && cachedRegisters.ContainsKey(CPURegisterEnum.AX))
+									{
+										ILExpression axValue = localRegisters.GetValueByKey(CPURegisterEnum.AX);
+										ILExpression quotient = new ILOperator(axValue, ILOperatorEnum.Divide, divOperand);
+										ILExpression remainder = new ILOperator(axValue, ILOperatorEnum.Modulo, divOperand);
+
+										localRegisters.SetValueByKey(CPURegisterEnum.AX, quotient);
+
+										if (localRegisters.ContainsKey(CPURegisterEnum.DX))
+										{
+											localRegisters.SetValueByKey(CPURegisterEnum.DX, remainder);
+										}
+										else
+										{
+											localRegisters.Add(CPURegisterEnum.DX, remainder);
+										}
+
+										if (!cachedRegisters.ContainsKey(CPURegisterEnum.DX))
+										{
+											cachedRegisters.Add(CPURegisterEnum.DX, node.ILInstructions.Count);
+										}
+									}
+									else
+									{
+										throw new Exception($"Use of a undefined local register 'AX' in IDIV");
+									}
+								}
+								break;
+
+							case CPUInstructionEnum.CLC:
+							case CPUInstructionEnum.STC:
+							case CPUInstructionEnum.CLD:
+							case CPUInstructionEnum.STD:
+							case CPUInstructionEnum.CLI:
+							case CPUInstructionEnum.STI:
+								// Flag manipulation — skip for IL translation
+								break;
+
+							case CPUInstructionEnum.LDS:
+							case CPUInstructionEnum.LES:
+								// Load far pointer: reg = [mem], segment = [mem+2]
+								parameter0 = instruction.Parameters[0];
+								parameter1 = instruction.Parameters[1];
+
+								if (parameter0.Type == CPUParameterTypeEnum.Register)
+								{
+									register = parameter0.RegisterValue;
+									parentFunction.LocalVariables.Add(parentFunction.LocalVariablePosition, new ILVariable(parentFunction,
+										this.parentFunction.ParentSegment.ParentProgram.IntValueType, parentFunction.LocalVariablePosition));
+									variable = new ILLocalVariableReference(parentFunction, parentFunction.LocalVariablePosition);
+
+									if (localRegisters.ContainsKey(register))
+									{
+										localRegisters.SetValueByKey(register, variable);
+									}
+									else
+									{
+										localRegisters.Add(register, variable);
+									}
+
+									node.ILInstructions.Add(new ILAssignment(variable, ParameterToIL(localSegments, localRegisters, parameter1)));
+
+									parentFunction.LocalVariablePosition += 2;
+								}
+								else
+								{
+									throw new Exception($"LDS/LES parameter type '{parameter0.Type}' not implemented");
+								}
+								break;
+
+							case CPUInstructionEnum.SAHF:
+							case CPUInstructionEnum.LAHF:
+								// Load/store flags from/to AH — skip for IL translation
 								break;
 
 							default:
@@ -1528,6 +2308,40 @@ namespace Disassembler
 			if (cache.ContainsKey(register))
 			{
 				cache.RemoveByKey(register);
+			}
+		}
+
+		/// <summary>
+		/// Maps x86 condition codes (from Jcc instructions) to IL condition enums.
+		/// </summary>
+		/// <param name="conditionCode">The condition code from the Jcc instruction (0x0-0xF).</param>
+		/// <param name="compareType">0 for CMP, 1 for TEST.</param>
+		private static ILConditionEnum ConditionCodeToILCondition(byte conditionCode, int compareType)
+		{
+			// x86 condition codes (low nibble of Jcc opcode):
+			// 0x0 = O,  0x1 = NO, 0x2 = B/C,  0x3 = AE/NC
+			// 0x4 = E/Z, 0x5 = NE/NZ, 0x6 = BE, 0x7 = A
+			// 0x8 = S, 0x9 = NS, 0xA = P, 0xB = NP
+			// 0xC = L, 0xD = GE, 0xE = LE, 0xF = G
+			switch (conditionCode & 0x0F)
+			{
+				case 0x0: return ILConditionEnum.Overflow;
+				case 0x1: return ILConditionEnum.NotOverflow;
+				case 0x2: return ILConditionEnum.UnsignedLessThan;          // JB/JC
+				case 0x3: return ILConditionEnum.UnsignedGreaterThanOrEqual; // JAE/JNC
+				case 0x4: return ILConditionEnum.Equal;                      // JE/JZ
+				case 0x5: return ILConditionEnum.NotEqual;                   // JNE/JNZ
+				case 0x6: return ILConditionEnum.UnsignedLessThanOrEqual;    // JBE
+				case 0x7: return ILConditionEnum.UnsignedGreaterThan;        // JA
+				case 0x8: return ILConditionEnum.Sign;                       // JS
+				case 0x9: return ILConditionEnum.NotSign;                    // JNS
+				// 0xA (JP) and 0xB (JNP) — parity, rare in application code
+				case 0xC: return ILConditionEnum.LessThan;                   // JL
+				case 0xD: return ILConditionEnum.GreaterThanOrEqual;          // JGE
+				case 0xE: return ILConditionEnum.LessThanOrEqual;            // JLE
+				case 0xF: return ILConditionEnum.GreaterThan;                // JG
+				default:
+					throw new Exception($"Unknown condition code 0x{conditionCode:X2}");
 			}
 		}
 

@@ -11,6 +11,8 @@ namespace Disassembler
 		IncrementBefore,
 		IncrementAfter,
 		DecrementBefore,
-		DecrementAfter
+		DecrementAfter,
+		Negate,
+		BitwiseNot
 	}
 }

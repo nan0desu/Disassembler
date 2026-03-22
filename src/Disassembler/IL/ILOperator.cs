@@ -50,6 +50,27 @@ namespace Disassembler
 				case ILOperatorEnum.Divide:
 					return "/";
 
+				case ILOperatorEnum.Modulo:
+					return "%";
+
+				case ILOperatorEnum.BitwiseAnd:
+					return "&";
+
+				case ILOperatorEnum.BitwiseOr:
+					return "|";
+
+				case ILOperatorEnum.BitwiseXor:
+					return "^";
+
+				case ILOperatorEnum.ShiftLeft:
+					return "<<";
+
+				case ILOperatorEnum.ShiftRight:
+					return ">>";
+
+				case ILOperatorEnum.ArithmeticShiftRight:
+					return ">>";
+
 				default:
 					return "UndefinedOperator";
 			}

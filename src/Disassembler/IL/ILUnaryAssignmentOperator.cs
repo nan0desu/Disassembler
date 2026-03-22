@@ -39,6 +39,12 @@ namespace Disassembler
 				case ILUnaryOperatorEnum.DecrementAfter:
 					return "--";
 
+				case ILUnaryOperatorEnum.Negate:
+					return "-";
+
+				case ILUnaryOperatorEnum.BitwiseNot:
+					return "~";
+
 				default:
 					return "UndefinedOperator";
 			}
@@ -55,6 +61,10 @@ namespace Disassembler
 				case ILUnaryOperatorEnum.IncrementAfter:
 				case ILUnaryOperatorEnum.DecrementAfter:
 					return $"{this.variable.ToCSString()}{UnaryOperatorToString(this.op)}";
+
+				case ILUnaryOperatorEnum.Negate:
+				case ILUnaryOperatorEnum.BitwiseNot:
+					return $"{UnaryOperatorToString(this.op)}{this.variable.ToCSString()}";
 
 				default:
 					return "UndefinedOperator";

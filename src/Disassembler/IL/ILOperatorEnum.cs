@@ -11,6 +11,13 @@ namespace Disassembler
 		Add,
 		Substract,
 		Multiply,
-		Divide
+		Divide,
+		Modulo,
+		BitwiseAnd,
+		BitwiseOr,
+		BitwiseXor,
+		ShiftLeft,
+		ShiftRight,
+		ArithmeticShiftRight
 	}
 }
