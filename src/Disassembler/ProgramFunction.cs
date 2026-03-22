@@ -1426,9 +1426,9 @@ namespace Disassembler
 							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.DAS();");
 							break;
 
-						/*case CPUInstructionEnum.AAA:
+						case CPUInstructionEnum.AAA:
 							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.AAA();");
-							break;*/
+							break;
 
 						case CPUInstructionEnum.SAR:
 						case CPUInstructionEnum.SHL:
@@ -1444,14 +1444,15 @@ namespace Disassembler
 								parameter.ToSourceCSTextMZ(instruction.OperandSize), instruction.Parameters[1].ToSourceCSTextMZ(instruction.Parameters[1].Size))));
 							break;
 
-						/*case CPUInstructionEnum.SHLD:
-							parameter = asmInstruction.Parameters[0];
+						case CPUInstructionEnum.SHLD:
+						case CPUInstructionEnum.SHRD:
+							parameter = instruction.Parameters[0];
 							writer.Write($"{GetTabs(tabLevel + 1)}");
-							writer.WriteLine(parameter.ToDestinationCSTextMZ(asmInstruction.OperandSize, string.Format("this.oCPU.{0}1{1}({2}, {3}, {4})",
-								asmInstruction.InstructionType.ToString(), asmInstruction.OperandSize.ToString(),
-								parameter.ToSourceCSTextMZ(asmInstruction.OperandSize), asmInstruction.Parameters[1].ToSourceCSTextMZ(asmInstruction.OperandSize),
-								asmInstruction.Parameters[2].ToSourceCSTextMZ(asmInstruction.Parameters[2].Size))));
-							break;*/
+							writer.WriteLine(parameter.ToDestinationCSTextMZ(instruction.OperandSize, string.Format("this.oCPU.{0}{1}({2}, {3}, {4})",
+								instruction.InstructionType.ToString(), instruction.OperandSize.ToString(),
+								parameter.ToSourceCSTextMZ(instruction.OperandSize), instruction.Parameters[1].ToSourceCSTextMZ(instruction.OperandSize),
+								instruction.Parameters[2].ToSourceCSTextMZ(instruction.Parameters[2].Size))));
+							break;
 
 						case CPUInstructionEnum.CBW:
 							if (instruction.OperandSize == CPUParameterSizeEnum.UInt16)
@@ -1475,19 +1476,19 @@ namespace Disassembler
 							}
 							break;
 
-						/*case CPUInstructionEnum.CMPS:
+						case CPUInstructionEnum.CMPS:
 							writer.Write($"{GetTabs(tabLevel + 1)}this.oCPU.");
-							if (asmInstruction.RepPrefix == CPUInstructionPrefixEnum.REPE || asmInstruction.RepPrefix == CPUInstructionPrefixEnum.REPNE)
+							if (instruction.RepPrefix == CPUInstructionPrefixEnum.REPE || instruction.RepPrefix == CPUInstructionPrefixEnum.REPNE)
 							{
 								writer.WriteLine("{0}_CMPS{1}(this.oCPU.ES, this.oCPU.DI, {2}, this.oCPU.SI);",
-									asmInstruction.RepPrefix.ToString(), asmInstruction.OperandSize.ToString(), asmInstruction.GetDefaultDataSegmentTextMZ());
+									instruction.RepPrefix.ToString(), instruction.OperandSize.ToString(), instruction.GetDefaultDataSegmentTextMZ());
 							}
 							else
 							{
 								writer.WriteLine("CMPS{0}(this.oCPU.ES, this.oCPU.DI, {1}, this.oCPU.SI);",
-									asmInstruction.OperandSize.ToString(), asmInstruction.GetDefaultDataSegmentTextMZ());
+									instruction.OperandSize.ToString(), instruction.GetDefaultDataSegmentTextMZ());
 							}
-							break;*/
+							break;
 
 						case CPUInstructionEnum.CMP:
 						case CPUInstructionEnum.TEST:
@@ -1615,14 +1616,14 @@ namespace Disassembler
 							}
 							break;
 
-						/*case CPUInstructionEnum.MOVSX:
+						case CPUInstructionEnum.MOVSX:
 						case CPUInstructionEnum.MOVZX:
-							parameter = asmInstruction.Parameters[0];
+							parameter = instruction.Parameters[0];
 							writer.Write($"{GetTabs(tabLevel + 1)}");
-							writer.WriteLine(parameter.ToDestinationCSTextMZ(asmInstruction.OperandSize, string.Format("this.oCPU.{0}{1}({2})",
-								asmInstruction.InstructionType.ToString(), asmInstruction.OperandSize.ToString(),
-								asmInstruction.Parameters[1].ToSourceCSTextMZ(asmInstruction.Parameters[1].Size))));
-							break;*/
+							writer.WriteLine(parameter.ToDestinationCSTextMZ(instruction.OperandSize, string.Format("this.oCPU.{0}{1}({2})",
+								instruction.InstructionType.ToString(), instruction.OperandSize.ToString(),
+								instruction.Parameters[1].ToSourceCSTextMZ(instruction.Parameters[1].Size))));
+							break;
 
 						case CPUInstructionEnum.NOP:
 							// ignore this instruction
@@ -1700,18 +1701,18 @@ namespace Disassembler
 							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.STI();");
 							break;
 
-						/*case CPUInstructionEnum.SCAS:
+						case CPUInstructionEnum.SCAS:
 							writer.Write($"{GetTabs(tabLevel + 1)}this.oCPU.");
-							if (asmInstruction.RepPrefix == CPUInstructionPrefixEnum.REPE || asmInstruction.RepPrefix == CPUInstructionPrefixEnum.REPNE)
+							if (instruction.RepPrefix == CPUInstructionPrefixEnum.REPE || instruction.RepPrefix == CPUInstructionPrefixEnum.REPNE)
 							{
 								writer.WriteLine("{0}_SCAS{1}();",
-									asmInstruction.RepPrefix.ToString(), asmInstruction.OperandSize.ToString());
+									instruction.RepPrefix.ToString(), instruction.OperandSize.ToString());
 							}
 							else
 							{
-								writer.WriteLine("SCAS{0}();", asmInstruction.OperandSize.ToString());
+								writer.WriteLine("SCAS{0}();", instruction.OperandSize.ToString());
 							}
-							break;*/
+							break;
 
 						case CPUInstructionEnum.STOS:
 							writer.Write($"{GetTabs(tabLevel + 1)}this.oCPU.");
@@ -1738,9 +1739,9 @@ namespace Disassembler
 							writer.WriteLine(parameter.ToDestinationCSTextMZ(instruction.OperandSize, string.Format("this.oCPU.Temp.{0}", instruction.OperandSize.ToString())));
 							break;
 
-						/*case CPUInstructionEnum.XLAT:
-							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.XLATUInt8({asmInstruction.GetDefaultDataSegmentTextMZ()});");
-							break;*/
+						case CPUInstructionEnum.XLAT:
+							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.XLATUInt8({instruction.GetDefaultDataSegmentTextMZ()});");
+							break;
 
 						// input and output port instructions
 						case CPUInstructionEnum.IN:
