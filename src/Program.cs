@@ -1,4 +1,4 @@
-﻿using Disassembler;
+using Disassembler;
 using Disassembler.CPU;
 using Disassembler.Formats.MZ;
 using Disassembler.Formats.OMF;
@@ -15,7 +15,7 @@ internal class Program
 
 		path = string.IsNullOrEmpty(path) ? "" : path;
 
-		ParseDOSEXE(path, 2);
+		ParseDOSEXE(path, 3);
 	}
 
 	private static void ParseDOSEXE(string path, int version)
@@ -32,10 +32,12 @@ internal class Program
 			Directory.CreateDirectory(dataPath);
 
 		// process Main code
-		Console.WriteLine("Loading EXE");
+		Console.WriteLine("* Loading EXE");
 
-		MZExecutable mainEXE = new(string.Format("..{0}..{0}..{0}..{0}..{0}..{0}Civilization Games{0}Civ I{0}Dos{0}CIV{1}.EXE", 
+		MZExecutable mainEXE = new(string.Format("GameSRC{0}Civ1{0}CIV.EXE", 
 			Path.DirectorySeparatorChar, version));
+		
+		//Console.WriteLine("OV index {0} flag {1}", mainEXE.OverlayIndex, mainEXE.OverlayFlag);
 
 		int baseAddress = mainEXE.InitialCS * 16;
 		ushort newDS = mainEXE.ReadUInt16(baseAddress + mainEXE.InitialIP + 0x2);
@@ -72,7 +74,7 @@ internal class Program
 		dataFile.Close();
 
 		Console.WriteLine("Loading library MLIBC7");
-        OMFLibrary library1 = new(string.Format("..{0}..{0}..{0}..{0}..{0}..{0}DOS Compilers{0}MSC{0}v5{0}Installed{0}MSC{0}LIB{0}MLIBC7.LIB",
+        OMFLibrary library1 = new(string.Format("DOS Compilers{0}MSC{0}v5{0}Installed{0}MSC{0}LIB{0}MLIBC7.LIB",
             Path.DirectorySeparatorChar));
 
         // unique set of segment names
@@ -99,7 +101,7 @@ internal class Program
 			}
 		}
 
-		/*Console.WriteLine("Used segment names:");
+		Console.WriteLine("Used segment names:");
 		for (int i = 0; i < segmentNames.Count; i++)
 		{
 			Console.WriteLine(segmentNames[i]);
@@ -109,15 +111,17 @@ internal class Program
 		for (int i = 0; i < groupNames.Count; i++)
 		{
 			Console.WriteLine(groupNames[i]);
-		}*/
+		}
 
 		List<ModuleMatch> libraryMatches = [];
-		Console.WriteLine("Matching MLIBC7");
+		Console.WriteLine("* Matching MLIBC7");
 		OMFLibrary.MatchLibrary(library1, mainEXE, libraryMatches);
 
 		MainProgram mainProgram = new(mainEXE, libraryMatches);
 		mainProgram.DefaultDS = newDS;
-
+		
+		Console.WriteLine("Library modules count {1}, matches {0}", libraryMatches.Count, library1.Modules.Count);
+		
 		#region MS C 5.1 API functions
 
 		// Word registers
@@ -428,7 +432,7 @@ internal class Program
 
 		#endregion
 
-		Console.WriteLine("Disassembling");
+		Console.WriteLine("* Disassembling");
 
 		// we start by decompiling Main function
 		ProgramFunction function = mainProgram.Disassemble(0, mainCS, mainIP, "Main");
@@ -592,7 +596,7 @@ internal class Program
 				break;
 		}
 
-		Console.WriteLine("Writing code");
+		Console.WriteLine("* Writing code");
 
 		StreamWriter objectWriter = new($"{codePath}{Path.DirectorySeparatorChar}ObjectsAsm.cs");
 		StreamWriter initWriter = new($"{codePath}{Path.DirectorySeparatorChar}InitsAsm.cs");
@@ -620,12 +624,15 @@ internal class Program
 			getWriter.WriteLine();
 		}
 
+		
+		Console.WriteLine("* Emitting flow graphs");
 		// Emit flow graphs
 		uint ilSegment = 0x181;
 		ushort ilFunction = 0x14a;
 
 		if (mainProgram.Segments.ContainsKey(ilSegment))
 		{
+			Console.WriteLine("Segment {0} exists", ilSegment);
 			ProgramSegment segment = mainProgram.Segments.GetValueByKey(ilSegment);
 
 			if (segment.Functions.ContainsKey(ilFunction))
@@ -635,131 +642,122 @@ internal class Program
 				if (function.FlowGraph != null)
 				{
 					function.FlowGraph.WriteGraphDOT("test.gv");
-					function.FlowGraph.TranslateToIL();
+					Console.WriteLine("Func {0} exists, writed test.gv", ilFunction);
 				}
             }
 		}
 
-		/*Console.WriteLine();
-		Console.WriteLine("Translating code to IL");
+		//Console.WriteLine();
+		Console.WriteLine("* Translating code to IL");
 		if (mainProgram.Segments.ContainsKey(0x181))
 		{
+			Console.WriteLine("Segment 0x181 exists for IL");
 			ProgramSegment segment = mainProgram.Segments.GetValueByKey(0x181);
-
+			Console.WriteLine("Segment 0x181 has {0} functions", segment.Functions.Count);
 			for (int i = 0; i < segment.Functions.Count; i++)
 			{
 				//segment.Functions[i].Value.TranslateToIL();
 			}
-		}*/
-
-		// emit Main API functions
-		/*List<ProgramFunction> aFunctions = new List<ProgramFunction>();
-
-		for (int i = 0; i < mainProgram.GlobalNamespace.APIFunctions.Count; i++)
-		{
-			aFunctions.Add(mainProgram.GlobalNamespace.APIFunctions[i].Value);
 		}
-
-		// emit Main API code
-		mainProgram.WriteCode(@"Out\Code\MSCAPI.cs", aFunctions);
-		objectWriter.WriteLine("private MSCAPI oMSCAPI;");
-		initWriter.WriteLine("this.oMSCAPI = new MSCAPI(this);");
-		getWriter.WriteLine("public MSCAPI MSCAPI");
-		getWriter.WriteLine("{");
-		getWriter.WriteLine("\tget { return this.oMSCAPI;}");
-		getWriter.WriteLine("}");*/
 
 		// Misc Driver
-		/*Console.WriteLine("Processing overlay Misc");
-		MZExecutable oMiscEXE = new MZExecutable(@"..\..\..\..\..\..\Civilization Games\Civ I\Dos\Installed\misc.exe");
-		Disassembler.MainProgram oMiscDisassembler = new Disassembler.MainProgram(oMiscEXE, aMatches);
+		Console.WriteLine("* Processing overlay Misc");
+		MZExecutable oMiscEXE = new(string.Format("GameSRC{0}Civ1{0}MISC.EXE",
+			Path.DirectorySeparatorChar));
+
+		List<ModuleMatch> aMatchesMisc = [];
+		Disassembler.MainProgram oMiscDisassembler = new Disassembler.MainProgram(oMiscEXE, aMatchesMisc);
 
 		oMiscDisassembler.DisassembleOverlay();
+		oMiscDisassembler.AssignOrdinals();
 
-		// Emit Misc functions
-		aFunctions = new List<MainProgramFunction>();
-		for (int i = 0; i < oMiscDisassembler.GlobalNamespace.Functions.Count; i++)
+		uint[] segmentOffsetsMisc = oMiscDisassembler.Segments.Keys.ToArray();
+		Array.Sort(segmentOffsetsMisc);
+
+		for (int i = 0; i < segmentOffsetsMisc.Length; i++)
 		{
-			aFunctions.Add(oMiscDisassembler.GlobalNamespace.Functions[i].Value);
+			ProgramSegment segment = oMiscDisassembler.Segments.GetValueByKey(segmentOffsetsMisc[i]);
+			segment.Name += "Misc";
+			segment.WriteAsmCS(codePath, 1);
 		}
 
-		oMiscDisassembler.WriteCode(@"Out\Code\Misc.cs", aFunctions);
-		objectWriter.WriteLine("private Misc oMisc;");
-		initWriter.WriteLine("this.oMisc = new Misc(this);");
-		getWriter.WriteLine();
-		getWriter.WriteLine("public Misc Misc");
-		getWriter.WriteLine("{");
-		getWriter.WriteLine("\tget { return this.oMisc;}");
-		getWriter.WriteLine("}");
+		Console.WriteLine("Misc segments: {0}", segmentOffsetsMisc.Length);
 
 		// VGA Driver
-		Console.WriteLine("Processing overlay VGA");
-		MZExecutable oVGAEXE = new MZExecutable(@"..\..\..\..\..\..\Civilization Games\Civ I\Dos\Installed\mgraphic.exe");
-		Disassembler.MainProgram oVGADisassembler = new Disassembler.MainProgram(oVGAEXE, aMatches);
-
-		oVGADisassembler.DisassembleOverlay();
-
-		// Emit egraphic functions
-		aFunctions = new List<MainProgramFunction>();
-		for (int i = 0; i < oVGADisassembler.GlobalNamespace.Functions.Count; i++)
+		Console.WriteLine("* Processing overlay VGA");
+		try
 		{
-			aFunctions.Add(oVGADisassembler.GlobalNamespace.Functions[i].Value);
-		}
+			MZExecutable oVGAEXE = new(string.Format("GameSRC{0}Civ1{0}MGRAPHIC.EXE",
+				Path.DirectorySeparatorChar));
 
-		oVGADisassembler.WriteCode(@"Out\Code\VGADriver.cs", aFunctions);
-		objectWriter.WriteLine("private VGADriver oVGA;");
-		initWriter.WriteLine("this.oVGA = new VGADriver(this);");
-		getWriter.WriteLine();
-		getWriter.WriteLine("public VGADriver VGA");
-		getWriter.WriteLine("{");
-		getWriter.WriteLine("\tget { return this.oVGA;}");
-		getWriter.WriteLine("}");
+			List<ModuleMatch> aMatchesMGA = [];
+			Disassembler.MainProgram oVGADisassembler = new Disassembler.MainProgram(oVGAEXE, aMatchesMGA);
+
+			oVGADisassembler.DisassembleOverlay();
+			oVGADisassembler.AssignOrdinals();
+
+			uint[] segmentOffsetsVGA = oVGADisassembler.Segments.Keys.ToArray();
+			Array.Sort(segmentOffsetsVGA);
+
+			for (int i = 0; i < segmentOffsetsVGA.Length; i++)
+			{
+				ProgramSegment segment = oVGADisassembler.Segments.GetValueByKey(segmentOffsetsVGA[i]);
+				segment.Name += "VGA";
+				segment.WriteAsmCS(codePath, 1);
+			}
+
+			Console.WriteLine("VGA segments: {0}", segmentOffsetsVGA.Length);
+		}
+		catch (Exception ex)
+		{
+			Console.WriteLine($"Warning: VGA overlay disassembly failed: {ex.Message}");
+		}
 
 		// NSound Driver
-		Console.WriteLine("Processing overlay NSound");
-		MZExecutable oNSEXE = new MZExecutable(@"..\..\..\..\..\Civ_I_Game\Dos\Installed\nsound.cvl");
-		MZDisassembler oNSoundDisassembler = new MZDisassembler(oNSEXE, aMatches);
+		Console.WriteLine("* Processing overlay NSound");
+		MZExecutable oNSEXE = new(string.Format("GameSRC{0}Civ1{0}NSOUND.CVL",
+			Path.DirectorySeparatorChar));
+
+		List<ModuleMatch> aMatchesNS = [];
+		Disassembler.MainProgram oNSoundDisassembler = new Disassembler.MainProgram(oNSEXE, aMatchesNS);
 
 		oNSoundDisassembler.DisassembleOverlay();
+		oNSoundDisassembler.AssignOrdinals();
 
-		// Emit nsound functions
-		aFunctions = new List<MZFunction>();
-		for (int i = 0; i < oNSoundDisassembler.GlobalNamespace.Functions.Count; i++)
+		uint[] segmentOffsetsONsnd = oNSoundDisassembler.Segments.Keys.ToArray();
+		Array.Sort(segmentOffsetsONsnd);
+
+		for (int i = 0; i < segmentOffsetsONsnd.Length; i++)
 		{
-			aFunctions.Add(oNSoundDisassembler.GlobalNamespace.Functions[i].Value);
+			ProgramSegment segment = oNSoundDisassembler.Segments.GetValueByKey(segmentOffsetsONsnd[i]);
+			segment.Name += "NSnd";
+			segment.WriteAsmCS(codePath, 1);
 		}
 
-		oNSoundDisassembler.WriteCode(@"Out\Code\NSound.cs", aFunctions);
-		writer.WriteLine("private NSound oNSound;");
-		writer1.WriteLine("this.oNSound = new NSound(this);");
-		writer2.WriteLine();
-		writer2.WriteLine("public NSound NSound");
-		writer2.WriteLine("{");
-		writer2.WriteLine("\tget { return this.oNSound;}");
-		writer2.WriteLine("}");
+		Console.WriteLine("NSound segments: {0}", segmentOffsetsONsnd.Length);
 
-		// GSound Driver
-		Console.WriteLine("Processing overlay GSound");
-		MZExecutable oGSoundEXE = new MZExecutable(@"..\..\..\..\..\..\Civilization Games\Civ I\Dos\Installed\GSOUND.CVL");
-		Disassembler.MainProgram oGSoundDisassembler = new Disassembler.MainProgram(oGSoundEXE, aMatches);
+		// RSound Driver
+		Console.WriteLine("* Processing overlay RSound");
+		MZExecutable oGSoundEXE = new(string.Format("GameSRC{0}Civ1{0}rsound.cvl",
+			Path.DirectorySeparatorChar));
+
+		List<ModuleMatch> aMatchesGS = [];
+		Disassembler.MainProgram oGSoundDisassembler = new Disassembler.MainProgram(oGSoundEXE, aMatchesGS);
 
 		oGSoundDisassembler.DisassembleOverlay();
+		oGSoundDisassembler.AssignOrdinals();
 
-		// Emit GSound functions
-		aFunctions = new List<MainProgramFunction>();
-		for (int i = 0; i < oGSoundDisassembler.GlobalNamespace.Functions.Count; i++)
+		uint[] segmentOffsetsOGsnd = oGSoundDisassembler.Segments.Keys.ToArray();
+		Array.Sort(segmentOffsetsOGsnd);
+
+		for (int i = 0; i < segmentOffsetsOGsnd.Length; i++)
 		{
-			aFunctions.Add(oGSoundDisassembler.GlobalNamespace.Functions[i].Value);
+			ProgramSegment segment = oGSoundDisassembler.Segments.GetValueByKey(segmentOffsetsOGsnd[i]);
+			segment.Name += "RSnd";
+			segment.WriteAsmCS(codePath, 1);
 		}
 
-		oGSoundDisassembler.WriteCode(@"Out\Code\GSound.cs", aFunctions);
-		objectWriter.WriteLine("private GSound oGSound;");
-		initWriter.WriteLine("this.oGSound = new GSound(this);");
-		getWriter.WriteLine();
-		getWriter.WriteLine("public GSound GSound");
-		getWriter.WriteLine("{");
-		getWriter.WriteLine("\tget { return this.oGSound;}");
-		getWriter.WriteLine("}");*/
+		Console.WriteLine("RSound segments: {0}", segmentOffsetsOGsnd.Length);
 
 		getWriter.Close();
 		initWriter.Close();

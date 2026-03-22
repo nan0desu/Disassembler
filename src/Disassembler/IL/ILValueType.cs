@@ -180,19 +180,13 @@ namespace Disassembler
 						return "int";
 
 					case ILBaseValueTypeEnum.Ptr16:
-						return $"{this.referencedType.CSDeclaration} *";
-
 					case ILBaseValueTypeEnum.Ptr32:
-						return $"{this.referencedType.CSDeclaration} *";
-
 					case ILBaseValueTypeEnum.FnPtr32:
-						return $"{this.referencedType.CSDeclaration} *";
+						return "IntPtr";
 
 					case ILBaseValueTypeEnum.Struct:
-						return $"struct {this.typeName}";
-
 					case ILBaseValueTypeEnum.Union:
-						return $"union {this.typeName}";
+						return string.IsNullOrEmpty(this.typeName) ? "IntPtr" : this.typeName;
 
 					case ILBaseValueTypeEnum.DirectObject:
 						return $"{this.typeName}";

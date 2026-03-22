@@ -6,7 +6,8 @@ namespace Disassembler.CPU.OpCodes
 	{
 		public static void ParseTable()
 		{
-			StreamReader file = new StreamReader(@"C:\Users\rajko\Documents\Projects\Disassembler\CPU\Instructions.txt");
+			//StreamReader file = new StreamReader(@"C:\Users\rajko\Documents\Projects\Disassembler\CPU\Instructions.txt");
+			StreamReader file = new StreamReader(@"Instructions.txt");
 			List<OpCodeInstructionDefinition> aInstructions = new List<OpCodeInstructionDefinition>();
 
 			while (!file.EndOfStream)

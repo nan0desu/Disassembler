@@ -2141,7 +2141,17 @@ namespace Disassembler
 							break;
 
 						case CPUInstructionEnum.INT:
-							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.INT(0x{instruction.Parameters[0].Value:x2});");
+							{
+								uint intNum = instruction.Parameters[0].Value;
+								// Try to find the AH value set before this INT to determine the DOS function
+								int? ahValue = FindPrecedingAHValue(k);
+								string intComment = GetInterruptComment((byte)intNum, ahValue);
+								if (!string.IsNullOrEmpty(intComment))
+								{
+									writer.WriteLine($"{GetTabs(tabLevel + 1)}// {intComment}");
+								}
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.INT(0x{intNum:x2});");
+							}
 							break;
 
 						default:
@@ -2188,6 +2198,197 @@ namespace Disassembler
 			}
 
 			return "!!!";
+		}
+
+		/// <summary>
+		/// Scan backwards from instruction index to find the last AH assignment value.
+		/// </summary>
+		private int? FindPrecedingAHValue(int fromIndex)
+		{
+			for (int j = fromIndex - 1; j >= 0 && j >= fromIndex - 10; j--)
+			{
+				CPUInstruction prev = this.asmInstructions[j];
+				if (prev.InstructionType == CPUInstructionEnum.MOV && prev.Parameters.Count == 2)
+				{
+					CPUParameter dest = prev.Parameters[0];
+					CPUParameter src = prev.Parameters[1];
+
+					// MOV AH, imm8
+					if (dest.Type == CPUParameterTypeEnum.Register &&
+						dest.Value == (uint)CPURegisterEnum.AH &&
+						src.Type == CPUParameterTypeEnum.Immediate)
+					{
+						return (int)src.Value;
+					}
+
+					// MOV AX, imm16 — AH is the high byte
+					if (dest.Type == CPUParameterTypeEnum.Register &&
+						dest.Value == (uint)CPURegisterEnum.AX &&
+						src.Type == CPUParameterTypeEnum.Immediate)
+					{
+						return (int)(src.Value >> 8);
+					}
+				}
+			}
+
+			return null;
+		}
+
+		/// <summary>
+		/// Returns a human-readable comment for a DOS/BIOS interrupt call.
+		/// </summary>
+		private static string GetInterruptComment(byte intNum, int? ahFunction)
+		{
+			switch (intNum)
+			{
+				case 0x10:
+					if (ahFunction == null) return "INT 10h - BIOS Video Services";
+					return (ahFunction.Value) switch
+					{
+						0x00 => "INT 10h/AH=00h - Set Video Mode",
+						0x01 => "INT 10h/AH=01h - Set Cursor Shape",
+						0x02 => "INT 10h/AH=02h - Set Cursor Position",
+						0x03 => "INT 10h/AH=03h - Get Cursor Position",
+						0x05 => "INT 10h/AH=05h - Set Active Display Page",
+						0x06 => "INT 10h/AH=06h - Scroll Up Window",
+						0x07 => "INT 10h/AH=07h - Scroll Down Window",
+						0x08 => "INT 10h/AH=08h - Read Char and Attribute at Cursor",
+						0x09 => "INT 10h/AH=09h - Write Char and Attribute at Cursor",
+						0x0A => "INT 10h/AH=0Ah - Write Char at Cursor",
+						0x0B => "INT 10h/AH=0Bh - Set Color Palette",
+						0x0C => "INT 10h/AH=0Ch - Write Pixel",
+						0x0D => "INT 10h/AH=0Dh - Read Pixel",
+						0x0E => "INT 10h/AH=0Eh - Write Char in Teletype Mode",
+						0x0F => "INT 10h/AH=0Fh - Get Current Video Mode",
+						0x10 => "INT 10h/AH=10h - Set/Get Palette Registers",
+						0x11 => "INT 10h/AH=11h - Character Generator",
+						0x12 => "INT 10h/AH=12h - Alternate Select",
+						0x13 => "INT 10h/AH=13h - Write String",
+						_ => $"INT 10h/AH={ahFunction.Value:X2}h - BIOS Video Services"
+					};
+
+				case 0x11:
+					return "INT 11h - BIOS Equipment List";
+
+				case 0x12:
+					return "INT 12h - BIOS Memory Size";
+
+				case 0x13:
+					if (ahFunction == null) return "INT 13h - BIOS Disk Services";
+					return (ahFunction.Value) switch
+					{
+						0x00 => "INT 13h/AH=00h - Reset Disk System",
+						0x01 => "INT 13h/AH=01h - Get Disk Status",
+						0x02 => "INT 13h/AH=02h - Read Sectors",
+						0x03 => "INT 13h/AH=03h - Write Sectors",
+						0x04 => "INT 13h/AH=04h - Verify Sectors",
+						0x05 => "INT 13h/AH=05h - Format Track",
+						0x08 => "INT 13h/AH=08h - Get Drive Parameters",
+						_ => $"INT 13h/AH={ahFunction.Value:X2}h - BIOS Disk Services"
+					};
+
+				case 0x16:
+					if (ahFunction == null) return "INT 16h - BIOS Keyboard Services";
+					return (ahFunction.Value) switch
+					{
+						0x00 => "INT 16h/AH=00h - Read Keyboard Character",
+						0x01 => "INT 16h/AH=01h - Check Keyboard Buffer",
+						0x02 => "INT 16h/AH=02h - Get Keyboard Shift Flags",
+						_ => $"INT 16h/AH={ahFunction.Value:X2}h - BIOS Keyboard Services"
+					};
+
+				case 0x1A:
+					if (ahFunction == null) return "INT 1Ah - BIOS Time Services";
+					return (ahFunction.Value) switch
+					{
+						0x00 => "INT 1Ah/AH=00h - Read System Clock Counter",
+						0x01 => "INT 1Ah/AH=01h - Set System Clock Counter",
+						0x02 => "INT 1Ah/AH=02h - Read Real-Time Clock",
+						_ => $"INT 1Ah/AH={ahFunction.Value:X2}h - BIOS Time Services"
+					};
+
+				case 0x21:
+					if (ahFunction == null) return "INT 21h - DOS Services";
+					return (ahFunction.Value) switch
+					{
+						0x00 => "INT 21h/AH=00h - Terminate Program",
+						0x01 => "INT 21h/AH=01h - Read Character with Echo",
+						0x02 => "INT 21h/AH=02h - Display Character",
+						0x06 => "INT 21h/AH=06h - Direct Console I/O",
+						0x07 => "INT 21h/AH=07h - Direct Console Input Without Echo",
+						0x08 => "INT 21h/AH=08h - Console Input Without Echo",
+						0x09 => "INT 21h/AH=09h - Display String",
+						0x0A => "INT 21h/AH=0Ah - Buffered Keyboard Input",
+						0x0B => "INT 21h/AH=0Bh - Check Keyboard Status",
+						0x0C => "INT 21h/AH=0Ch - Flush Buffer and Read Input",
+						0x0D => "INT 21h/AH=0Dh - Disk Reset",
+						0x0E => "INT 21h/AH=0Eh - Select Disk",
+						0x0F => "INT 21h/AH=0Fh - Open File (FCB)",
+						0x10 => "INT 21h/AH=10h - Close File (FCB)",
+						0x11 => "INT 21h/AH=11h - Find First File (FCB)",
+						0x12 => "INT 21h/AH=12h - Find Next File (FCB)",
+						0x13 => "INT 21h/AH=13h - Delete File (FCB)",
+						0x19 => "INT 21h/AH=19h - Get Current Default Drive",
+						0x1A => "INT 21h/AH=1Ah - Set Disk Transfer Address",
+						0x25 => "INT 21h/AH=25h - Set Interrupt Vector",
+						0x29 => "INT 21h/AH=29h - Parse Filename",
+						0x2A => "INT 21h/AH=2Ah - Get System Date",
+						0x2C => "INT 21h/AH=2Ch - Get System Time",
+						0x30 => "INT 21h/AH=30h - Get DOS Version",
+						0x33 => "INT 21h/AH=33h - Get/Set Break Flag",
+						0x35 => "INT 21h/AH=35h - Get Interrupt Vector",
+						0x36 => "INT 21h/AH=36h - Get Free Disk Space",
+						0x38 => "INT 21h/AH=38h - Get/Set Country Info",
+						0x39 => "INT 21h/AH=39h - Create Directory",
+						0x3A => "INT 21h/AH=3Ah - Remove Directory",
+						0x3B => "INT 21h/AH=3Bh - Change Current Directory",
+						0x3C => "INT 21h/AH=3Ch - Create File",
+						0x3D => "INT 21h/AH=3Dh - Open File",
+						0x3E => "INT 21h/AH=3Eh - Close File",
+						0x3F => "INT 21h/AH=3Fh - Read File",
+						0x40 => "INT 21h/AH=40h - Write File",
+						0x41 => "INT 21h/AH=41h - Delete File",
+						0x42 => "INT 21h/AH=42h - Move File Pointer (Seek)",
+						0x43 => "INT 21h/AH=43h - Get/Set File Attributes",
+						0x44 => "INT 21h/AH=44h - IOCTL",
+						0x47 => "INT 21h/AH=47h - Get Current Directory",
+						0x48 => "INT 21h/AH=48h - Allocate Memory",
+						0x49 => "INT 21h/AH=49h - Free Memory",
+						0x4A => "INT 21h/AH=4Ah - Resize Memory Block",
+						0x4B => "INT 21h/AH=4Bh - Execute Program (EXEC)",
+						0x4C => "INT 21h/AH=4Ch - Terminate with Return Code",
+						0x4D => "INT 21h/AH=4Dh - Get Return Code",
+						0x4E => "INT 21h/AH=4Eh - Find First File",
+						0x4F => "INT 21h/AH=4Fh - Find Next File",
+						0x56 => "INT 21h/AH=56h - Rename File",
+						0x57 => "INT 21h/AH=57h - Get/Set File Date and Time",
+						0x5B => "INT 21h/AH=5Bh - Create New File",
+						_ => $"INT 21h/AH={ahFunction.Value:X2}h - DOS Services"
+					};
+
+				case 0x2F:
+					return "INT 2Fh - Multiplex Interrupt";
+
+				case 0x33:
+					if (ahFunction == null) return "INT 33h - Mouse Services";
+					return (ahFunction.Value) switch
+					{
+						0x00 => "INT 33h/AX=0000h - Reset/Check Mouse Installed",
+						0x01 => "INT 33h/AX=0001h - Show Mouse Cursor",
+						0x02 => "INT 33h/AX=0002h - Hide Mouse Cursor",
+						0x03 => "INT 33h/AX=0003h - Get Mouse Position and Button Status",
+						0x04 => "INT 33h/AX=0004h - Set Mouse Cursor Position",
+						0x07 => "INT 33h/AX=0007h - Set Horizontal Min/Max Position",
+						0x08 => "INT 33h/AX=0008h - Set Vertical Min/Max Position",
+						0x0C => "INT 33h/AX=000Ch - Set Mouse User Handler",
+						0x0F => "INT 33h/AX=000Fh - Set Mouse Mickey/Pixel Ratio",
+						0x10 => "INT 33h/AX=0010h - Set Mouse Exclusion Area",
+						_ => $"INT 33h/AX={ahFunction.Value:X4}h - Mouse Services"
+					};
+
+				default:
+					return $"INT {intNum:X2}h";
+			}
 		}
 
 		private string GetTabs(int tabLevel)
