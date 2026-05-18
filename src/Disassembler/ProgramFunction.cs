@@ -1154,65 +1154,6 @@ namespace Disassembler
 			}
 			#endregion
 
-			#region Check inline If statements
-			/*for (int i = 0; i < this.asmInstructions.Count; i++)
-			{
-				CPUInstruction instruction = this.asmInstructions[i];
-				CPUInstruction instruction1;
-
-				switch (instruction.InstructionType)
-				{
-					case CPUInstructionEnum.Jcc:
-						if (!instruction.Label && i > 0)
-						{
-							instruction1 = this.asmInstructions[i - 1];
-							switch (instruction1.InstructionType)
-							{
-								case CPUInstructionEnum.CMP:
-									break;
-
-								case CPUInstructionEnum.TEST:
-									break;
-
-								case CPUInstructionEnum.AND:
-									break;
-
-								case CPUInstructionEnum.OR:
-									break;
-
-								case CPUInstructionEnum.XOR:
-									break;
-
-								case CPUInstructionEnum.ADD:
-									break;
-
-								case CPUInstructionEnum.SUB:
-									break;
-
-								case CPUInstructionEnum.INC:
-									break;
-
-								case CPUInstructionEnum.DEC:
-									break;
-
-								default:
-									Console.WriteLine($"Instruction '{instruction1}' precedes Jcc instruction in function {this.parentSegment.Name}.{this.Name}, 0x{fnAddress:x}");
-									break;
-							}
-						}
-						else if (instruction.Label)
-						{
-							Console.WriteLine($"Label on Jcc instruction in function {this.parentSegment.Name}.{this.Name}, 0x{fnAddress:x}");
-						}
-						else
-						{
-							throw new Exception($"Jcc instruction is first in function {this.parentSegment.Name}.{this.Name}, 0x{fnAddress:x}");
-						}
-						break;
-				}
-			}*/
-			#endregion
-
 			#region Translate inline If statements
 			for (int i = 0; i < this.asmInstructions.Count; i++)
 			{
@@ -1271,6 +1212,7 @@ namespace Disassembler
 								//Console.Write("");
 								instruction1 = this.asmInstructions[i];
 								instruction1.InstructionType = CPUInstructionEnum.IIf;
+								instruction1.OperandSize = registerSize;
 								instruction1.Parameters.Clear();
 
 								instruction1.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Register, (CPUParameterSizeEnum)registerSize, (uint)register));
@@ -1297,6 +1239,108 @@ namespace Disassembler
 			#endregion
 
 			this.flowGraph = new FlowGraph(this, this.Name);
+
+			#region Check If statements, but only for non assembly functions
+			if (this.flowGraph.HasBPFrame)
+			{
+				for (int i = 0; i < this.asmInstructions.Count; i++)
+				{
+					CPUInstruction instruction = this.asmInstructions[i];
+					CPUInstruction instruction1;
+
+					switch (instruction.InstructionType)
+					{
+						case CPUInstructionEnum.Jcc:
+							if (!instruction.Label && i > 0)
+							{
+								int count = 0;
+								int pos = i - 1;
+								CPUJumpConditionEnum condition;
+
+								instruction1 = this.asmInstructions[pos];
+
+								// search backwards for compare instruction up to 3 instruction before main jcc instruction
+								while (count < 3 && pos >= 0 && (instruction1 = this.asmInstructions[pos]).InstructionType == CPUInstructionEnum.Jcc)
+								{
+									if (instruction1.Label)
+									{
+										Console.WriteLine($"Detected label while searching for Jcc compare instruction in function {this.parentSegment.Name}.{this.Name}, 0x{fnAddress:x}");
+										pos = -1;
+										break;
+									}
+
+									pos--;
+									count++;
+								}
+
+								if (pos != i - 1)
+								{
+									Console.WriteLine($"Adjusted position to {instruction1} on {instruction}");
+								}
+
+								if (pos >= 0)
+								{
+									switch (instruction1.InstructionType)
+									{
+										case CPUInstructionEnum.CMP:
+											break;
+
+										case CPUInstructionEnum.TEST:
+											break;
+
+										case CPUInstructionEnum.AND:
+											break;
+
+										case CPUInstructionEnum.OR:
+											break;
+
+										case CPUInstructionEnum.XOR:
+											break;
+
+										case CPUInstructionEnum.ADD:
+											break;
+
+										case CPUInstructionEnum.SUB:
+											break;
+
+										case CPUInstructionEnum.INC:
+											break;
+
+										case CPUInstructionEnum.DEC:
+											break;
+
+										case CPUInstructionEnum.INT:
+											if (instruction.Parameters[0].Type == CPUParameterTypeEnum.Condition &&
+												((condition = (CPUJumpConditionEnum)instruction.Parameters[0].Value) == CPUJumpConditionEnum.B ||
+												condition == CPUJumpConditionEnum.AE))
+											{
+												Console.WriteLine($"'{instruction1}' before '{instruction}' in function {this.parentSegment.Name}.{this.Name}, 0x{fnAddress:x}");
+											}
+											else
+											{
+												Console.WriteLine($"Instruction '{instruction1}' precedes '{instruction}' in function {this.parentSegment.Name}.{this.Name}, 0x{fnAddress:x}");
+											}
+											break;
+
+										default:
+											Console.WriteLine($"Instruction '{instruction1}' precedes '{instruction}' in function {this.parentSegment.Name}.{this.Name}, 0x{fnAddress:x}");
+											break;
+									}
+								}
+							}
+							else if (instruction.Label)
+							{
+								Console.WriteLine($"Label on Jcc instruction in function {this.parentSegment.Name}.{this.Name}, 0x{fnAddress:x}");
+							}
+							else
+							{
+								throw new Exception($"Jcc instruction is first in function {this.parentSegment.Name}.{this.Name}, 0x{fnAddress:x}");
+							}
+							break;
+					}
+				}
+			}
+			#endregion
 
 			#region Process calls to other functions
 			for (int i = 0; i < this.asmInstructions.Count; i++)
@@ -1596,7 +1640,7 @@ namespace Disassembler
 			{
 				if (this.flowGraph != null)
 				{
-					writer.WriteLine($"{GetTabs(tabLevel + 1)}// {(this.flowGraph.BPFrame ? "Standard C frame" : "Assembly")}");
+					writer.WriteLine($"{GetTabs(tabLevel + 1)}// {(this.flowGraph.HasBPFrame ? "Standard C frame" : "Assembly")}");
 				}
 
 				if (verbosity > 0)
@@ -1657,6 +1701,7 @@ namespace Disassembler
 					}
 
 					uint uiOffset = 0;
+					uint address = 0;
 					CPUParameter parameter;
 					ProgramFunction? function1;
 					int instructionIndex;
@@ -1995,12 +2040,26 @@ namespace Disassembler
 							parameter = instruction.Parameters[0];
 							//writer.WriteLine("{GetTabs(tabLevel)}// XCHG");
 							writer.Write($"{GetTabs(tabLevel + 1)}");
-							writer.WriteLine("this.oCPU.Temp.{0} = {1};", instruction.OperandSize.ToString(), parameter.ToSourceCSTextMZ(instruction.OperandSize));
+							if (instruction.OperandSize == CPUParameterSizeEnum.UInt8)
+							{
+								writer.WriteLine("this.oCPU.Temp.Low{0} = {1};", instruction.OperandSize.ToString(), parameter.ToSourceCSTextMZ(instruction.OperandSize));
+							}
+							else
+							{
+								writer.WriteLine("this.oCPU.Temp.{0} = {1};", instruction.OperandSize.ToString(), parameter.ToSourceCSTextMZ(instruction.OperandSize));
+							}
 							writer.Write($"{GetTabs(tabLevel + 1)}");
 							writer.WriteLine(parameter.ToDestinationCSTextMZ(instruction.OperandSize, instruction.Parameters[1].ToSourceCSTextMZ(instruction.OperandSize)));
 							parameter = instruction.Parameters[1];
 							writer.Write($"{GetTabs(tabLevel + 1)}");
-							writer.WriteLine(parameter.ToDestinationCSTextMZ(instruction.OperandSize, string.Format("this.oCPU.Temp.{0}", instruction.OperandSize.ToString())));
+							if (instruction.OperandSize == CPUParameterSizeEnum.UInt8)
+							{
+								writer.WriteLine(parameter.ToDestinationCSTextMZ(instruction.OperandSize, string.Format("this.oCPU.Temp.Low{0}", instruction.OperandSize.ToString())));
+							}
+							else
+							{
+								writer.WriteLine(parameter.ToDestinationCSTextMZ(instruction.OperandSize, string.Format("this.oCPU.Temp.{0}", instruction.OperandSize.ToString())));
+							}
 							break;
 
 						/*case CPUInstructionEnum.XLAT:
@@ -2063,7 +2122,7 @@ namespace Disassembler
 								}
 								else
 								{
-									writer.WriteLine($"{GetTabs(tabLevel + 2)}case {0}:", parameter.Value);
+									writer.WriteLine($"{GetTabs(tabLevel + 2)}case {parameter.Value}:");
 									writer.WriteLine($"{GetTabs(tabLevel + 3)}goto {this.asmInstructions[instructionIndex].LabelName};");
 								}
 							}
@@ -2153,15 +2212,24 @@ namespace Disassembler
 							parameter = instruction.Parameters[0];
 							if (parameter.Type == CPUParameterTypeEnum.SegmentOffset)
 							{
-								uiOffset = MainProgram.ToLinearAddress(parameter.Segment, parameter.Value);
+								address = MainProgram.ToLinearAddress(parameter.Segment, parameter.Value);
 
-								if (uiOffset == 0)
+								if (address == 0)
 								{
-									writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.JmpUInt32(this.oCPU.ReadUInt32(this.oCPU.CS.UInt16, 0x{(instruction.Offset + 1):x}));");
+									ProgramSegment segment = this.parentSegment;
+									if (segment.GlobalVariables.ContainsKey(instruction.Offset + 1))
+									{
+										ILVariable variable = segment.GlobalVariables.GetValueByKey(instruction.Offset + 1);
+										writer.WriteLine($"{GetTabs(tabLevel + 1)}this.{variable.Name}();");
+									}
+									else
+									{
+										writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.JmpUInt32(this.oCPU.ReadUInt32(this.oCPU.CS.UInt16, 0x{(instruction.Offset + 1):x}));");
+									}
 								}
 								else
 								{
-									instructionIndex = this.GetInstructionPositionByLinearAddress(uiOffset);
+									instructionIndex = this.GetInstructionPositionByLinearAddress(address);
 
 									if (instructionIndex < 0)
 									{
@@ -2188,7 +2256,7 @@ namespace Disassembler
 							}
 							else
 							{
-								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PushUInt16(0); // stack management - push return offset");
+								//writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PushUInt16(0); // stack management - push return offset");
 							}
 
 							if (parameter.Type != CPUParameterTypeEnum.Immediate)
@@ -2245,9 +2313,13 @@ namespace Disassembler
 									throw new Exception($"Can't find function 'F0_{parameter.Segment:x4}_{parameter.Value:x4}'");
 								}
 							}
+
 							// all calls in medium memory model are far
-							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PopUInt16(); // stack management - pop return offset");
-							//writer.WriteLine("{GetTabs(tabLevel)+1}this.oCPU.CS.UInt16 = 0x{0:x4}; // restore this function segment", function.Segment);
+							if (verbosity > 0)
+							{
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PopUInt16(); // stack management - pop return offset");
+								//writer.WriteLine("{GetTabs(tabLevel)+1}this.oCPU.CS.UInt16 = 0x{0:x4}; // restore this function segment", function.Segment);
+							}
 							break;
 
 						case CPUInstructionEnum.CALLF:
@@ -2260,7 +2332,7 @@ namespace Disassembler
 							}
 							else
 							{
-								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PushUInt32(0); // stack management - push return segment, offset");
+								//writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PushUInt32(0); // stack management - push return segment, offset");
 							}
 
 							if (parameter.Type == CPUParameterTypeEnum.SegmentOffset)
@@ -2316,9 +2388,10 @@ namespace Disassembler
 							{
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.CallUInt32(this.oCPU.ReadUInt32({parameter.GetSegmentTextMZ()}, {parameter.ToCSTextMZ(instruction.OperandSize)}));");
 							}
-							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PopUInt32(); // stack management - pop return offset and segment");
+							
 							if (verbosity > 0)
 							{
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PopUInt32(); // stack management - pop return offset and segment");
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.CS.UInt16 = 0x{this.parentSegment.CPUSegment:x4}; // restore this function segment");
 							}
 							break;
@@ -2332,7 +2405,7 @@ namespace Disassembler
 							}
 							else
 							{
-								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PushUInt32(0); // stack management - push return segment, offset");
+								//writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PushUInt32(0); // stack management - push return segment, offset");
 							}
 
 							function1 = this.parentSegment.ParentProgram.FindFunction((ushort)instruction.Parameters[0].Value, 0, (ushort)instruction.Parameters[1].Value);
@@ -2364,9 +2437,9 @@ namespace Disassembler
 								throw new Exception($"Can't find function 'F{instruction.Parameters[0].Value}_0000_{instruction.Parameters[1].Value:x4}'");
 							}
 
-							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PopUInt32(); // stack management - pop return offset and segment");
 							if (verbosity > 0)
 							{
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PopUInt32(); // stack management - pop return offset and segment");
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.CS.UInt16 = 0x{this.parentSegment.CPUSegment:x4}; // restore this function segment");
 							}
 							break;
@@ -2413,7 +2486,7 @@ namespace Disassembler
 							break;
 
 						case CPUInstructionEnum.INT:
-							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.INT(0x{instruction.Parameters[0].Value:x2});");
+							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.INTUInt8(0x{instruction.Parameters[0].Value:x2});");
 							break;
 
 						case CPUInstructionEnum.Remark:

@@ -61,8 +61,6 @@ namespace Disassembler
 				throw new Exception($"Expected instruction at 0x{this.parentFunction.FunctionEntryPoint:x}");
 			}
 
-			this.startNode = CreateOrFindNode(0xffffffff, FlowGraphNodeTypeEnum.Start, unprocessedNodes, false);
-
 			FlowGraphNode currentNode = CreateOrFindNode(this.parentFunction.FunctionEntryPoint, FlowGraphNodeTypeEnum.Block, unprocessedNodes, false);
 
 			this.startNode.ChildNodes.Add(currentNode);
@@ -707,7 +705,14 @@ namespace Disassembler
 				{
 					FlowGraphNode childNode = node.ChildNodes[j];
 
-					this.nodes.GetValueByKey(childNode.LinearAddress).ReferenceNodes.Add(node.LinearAddress, node);
+					if (childNode.NodeType == FlowGraphNodeTypeEnum.End)
+					{
+						this.endNode.ReferenceNodes.Add(node.LinearAddress, node);
+					}
+					else
+					{
+						this.nodes.GetValueByKey(childNode.LinearAddress).ReferenceNodes.Add(node.LinearAddress, node);
+					}
 				}
 			}
 
@@ -2862,7 +2867,7 @@ namespace Disassembler
 
 		public FlowGraphLocalEnum DefinedLocals { get => this.definedLocals; set => this.definedLocals = value; }
 
-		public bool BPFrame { get => this.hasBPFrame; }
+		public bool HasBPFrame { get => this.hasBPFrame; }
 
 		private class CachedRegisterItem
 		{
