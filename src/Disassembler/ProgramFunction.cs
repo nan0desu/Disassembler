@@ -552,8 +552,13 @@ namespace Disassembler
 								uint newAddress = address;
 								ushort newSegment = segment;
 
-								while ((instruction1 = this.asmInstructions[GetInstructionPositionByLinearAddress(newAddress)]).InstructionType == CPUInstructionEnum.JMP ||
-									instruction1.InstructionType == CPUInstructionEnum.JMPF)
+								int targetPosition;
+
+								// the chain can leave this function, into an overlay that isn't loaded
+								// or into code not disassembled yet. Stop there and leave the jump alone.
+								while ((targetPosition = GetInstructionPositionByLinearAddress(newAddress)) >= 0 &&
+									((instruction1 = this.asmInstructions[targetPosition]).InstructionType == CPUInstructionEnum.JMP ||
+									instruction1.InstructionType == CPUInstructionEnum.JMPF))
 								{
 									CPUParameter parameter1 = instruction1.Parameters[0];
 
@@ -605,7 +610,11 @@ namespace Disassembler
 							uint address = (uint)(fnSegment + parameter0.Value);
 							uint newAddress = address;
 
-							while ((instruction1 = this.asmInstructions[GetInstructionPositionByLinearAddress(newAddress)]).InstructionType == CPUInstructionEnum.JMP)
+							int targetPosition;
+
+							// same as above, the chain can leave the instructions we have
+							while ((targetPosition = GetInstructionPositionByLinearAddress(newAddress)) >= 0 &&
+								(instruction1 = this.asmInstructions[targetPosition]).InstructionType == CPUInstructionEnum.JMP)
 							{
 								newAddress = (uint)(fnSegment + instruction1.Parameters[0].Value);
 							}
@@ -681,9 +690,7 @@ namespace Disassembler
 							}
 							else
 							{
-								instruction1 = this.asmInstructions[GetInstructionPositionByLinearAddress(newAddress)];
-								instruction1.Label = true;
-								instruction1.ReferenceCount++;
+								MarkLabel(newAddress);
 							}
 						}
 						break;
@@ -697,18 +704,14 @@ namespace Disassembler
 
 							if (newAddress != 0)
 							{
-								instruction1 = this.asmInstructions[GetInstructionPositionByLinearAddress(newAddress)];
-								instruction1.Label = true;
-								instruction1.ReferenceCount++;
+								MarkLabel(newAddress);
 							}
 						}
 						break;
 
 					case CPUInstructionEnum.Jcc:
 						newAddress = (ushort)instruction.Parameters[1].Value;
-						instruction1 = this.asmInstructions[GetInstructionPositionByLinearAddress((uint)(fnSegment + newAddress))];
-						instruction1.Label = true;
-						instruction1.ReferenceCount++;
+						MarkLabel((uint)(fnSegment + newAddress));
 						break;
 
 					case CPUInstructionEnum.LOOP:
@@ -716,9 +719,7 @@ namespace Disassembler
 					case CPUInstructionEnum.LOOPNE:
 					case CPUInstructionEnum.JCXZ:
 						newAddress = (ushort)(instruction.Parameters[0].Value & 0xffff);
-						instruction1 = this.asmInstructions[GetInstructionPositionByLinearAddress((uint)(fnSegment + newAddress))];
-						instruction1.Label = true;
-						instruction1.ReferenceCount++;
+						MarkLabel((uint)(fnSegment + newAddress));
 						break;
 
 					case CPUInstructionEnum.SWITCH:
@@ -726,9 +727,7 @@ namespace Disassembler
 						{
 							parameter = instruction.Parameters[j];
 
-							instruction1 = this.asmInstructions[GetInstructionPositionByLinearAddress((uint)(fnSegment + parameter.Displacement))];
-							instruction1.Label = true;
-							instruction1.ReferenceCount++;
+							MarkLabel((uint)(fnSegment + parameter.Displacement));
 						}
 						break;
 				}
@@ -1498,6 +1497,29 @@ namespace Disassembler
 			}
 
 			return null;
+		}
+
+		/// <summary>
+		/// Marks the instruction at a linear address as a jump target. The address can fall outside
+		/// the instructions we have, into an overlay that isn't loaded or code that hasn't been
+		/// disassembled, in which case there is nothing to mark.
+		/// </summary>
+		/// <returns>false when the address isn't one of this function's instructions</returns>
+		private bool MarkLabel(uint address)
+		{
+			int position = GetInstructionPositionByLinearAddress(address);
+
+			if (position < 0)
+			{
+				return false;
+			}
+
+			CPUInstruction target = this.asmInstructions[position];
+
+			target.Label = true;
+			target.ReferenceCount++;
+
+			return true;
 		}
 
 		public int GetInstructionPositionByLinearAddress(uint address)

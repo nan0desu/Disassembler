@@ -364,7 +364,7 @@ namespace Disassembler
 								}
 								else
 								{
-									throw new Exception($"Expected next instruction in {currentNode.NodeType} block");
+									throw new Exception($"Expected next instruction in {currentNode.NodeType} block after '{instruction}' at 0x{instruction.LinearAddress:x}");
 								}
 							}
 							else if (!this.nodes.ContainsKey(instruction.LinearAddress))
@@ -384,7 +384,7 @@ namespace Disassembler
 								}
 								else
 								{
-									throw new Exception($"Expected next instruction in {newNode.NodeType} block");
+									throw new Exception($"Expected next instruction in {newNode.NodeType} block after '{instruction}' at 0x{instruction.LinearAddress:x}");
 								}
 							}
 							else
@@ -416,7 +416,7 @@ namespace Disassembler
 								}
 								else
 								{
-									throw new Exception($"Expected next instruction in {currentNode.NodeType} block");
+									throw new Exception($"Expected next instruction in {currentNode.NodeType} block after '{instruction}' at 0x{instruction.LinearAddress:x}");
 								}
 							}
 							else if (!this.nodes.ContainsKey(instruction.LinearAddress))
@@ -436,7 +436,7 @@ namespace Disassembler
 								}
 								else
 								{
-									throw new Exception($"Expected next instruction in {newNode.NodeType} block");
+									throw new Exception($"Expected next instruction in {newNode.NodeType} block after '{instruction}' at 0x{instruction.LinearAddress:x}");
 								}
 							}
 							else
@@ -464,7 +464,7 @@ namespace Disassembler
 								}
 								else
 								{
-									throw new Exception($"Expected next instruction in {currentNode.NodeType} block");
+									throw new Exception($"Expected next instruction in {currentNode.NodeType} block after '{instruction}' at 0x{instruction.LinearAddress:x}");
 								}
 							}
 							else if (!this.nodes.ContainsKey(instruction.LinearAddress))
@@ -484,7 +484,7 @@ namespace Disassembler
 								}
 								else
 								{
-									throw new Exception($"Expected next instruction in {newNode.NodeType} block");
+									throw new Exception($"Expected next instruction in {newNode.NodeType} block after '{instruction}' at 0x{instruction.LinearAddress:x}");
 								}
 							}
 							else
@@ -685,11 +685,18 @@ namespace Disassembler
 
 						if (node.LinearAddress != 0)
 						{
-							instructionPos = this.parentFunction.GetInstructionPositionByLinearAddress(node.LinearAddress);
-							if (instructionPos < 0)
+							int nodePosition = this.parentFunction.GetInstructionPositionByLinearAddress(node.LinearAddress);
+
+							if (nodePosition < 0)
 							{
-								throw new Exception($"Expected next instruction in {node.NodeType} block");
+								// The target isn't one of this function's instructions, so it is a
+								// transfer out of the function. Colonization's overlay thunks do this:
+								// their JMP FAR operand is an overlay entry id, not a real address.
+								// Leave the node empty instead of abandoning the whole function.
+								continue;
 							}
+
+							instructionPos = nodePosition;
 							currentNode = node;
 							break;
 						}

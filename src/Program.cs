@@ -26,6 +26,84 @@ internal class Program
 	}
 
 	/// <summary>
+	/// The values the MicroSoft C startup code hands to the program: the DGROUP data segment
+	/// and the entry point of main().
+	/// </summary>
+	private record MSCStartup(ushort DataSegment, ushort MainSegment, ushort MainOffset,
+		ushort Crt0Segment, ushort Crt0Offset);
+
+	/// <summary>
+	/// Locates main() by reading the MSC startup code, rather than by the fixed offsets the Civ1
+	/// path uses. Civ1 and Colonization share the same __astart shape but reach it differently and
+	/// sit at different offsets inside it, so one set of constants can't serve both.
+	///
+	/// On the Civ1 layout this finds exactly what the hardcoded offsets find.
+	/// </summary>
+	private static MSCStartup? FindMSCStartup(MZExecutable exe)
+	{
+		byte[] data = exe.Data;
+		int entry = exe.InitialCS * 16 + exe.InitialIP;
+
+		if (entry < 0 || entry + 0x51 >= data.Length)
+			return null;
+
+		ushort crt0Segment;
+		ushort crt0Offset;
+
+		if (data[entry] == 0x9a && data[entry + 5] == 0xea)
+		{
+			// overlay aware startup: CALL FAR <overlay manager init>, then JMP FAR <__astart>
+			crt0Offset = exe.ReadUInt16(entry + 6);
+			crt0Segment = exe.ReadUInt16(entry + 8);
+		}
+		else
+		{
+			// plain startup, it reaches __astart through a pointer in its own segment
+			crt0Segment = exe.InitialCS;
+			crt0Offset = exe.ReadUInt16(entry + 0x4f);
+		}
+
+		int crt0 = crt0Segment * 16 + crt0Offset;
+		int length = Math.Min(0x140, data.Length - crt0);
+
+		if (crt0 < 0 || length < 0x20)
+			return null;
+
+		// DGROUP, from the 'MOV DI, DGROUP' that precedes 'MOV SS, DI' in the stack setup
+		ushort dataSegment = 0;
+
+		for (int i = 0; i < Math.Min(0x30, length - 3); i++)
+		{
+			if (data[crt0 + i] == 0xbf)
+			{
+				dataSegment = exe.ReadUInt16(crt0 + i + 1);
+				break;
+			}
+		}
+
+		if (dataSegment == 0)
+			return null;
+
+		// main(), from the 'CALL FAR _main; PUSH AX; <call exit>' tail. The exit call is a far call
+		// in Civ1 and a 'PUSH CS; CALL NEAR' in Colonization, so accept either.
+		for (int i = length - 9; i >= 0; i--)
+		{
+			if (data[crt0 + i] != 0x9a || data[crt0 + i + 5] != 0x50)
+				continue;
+
+			byte after = data[crt0 + i + 6];
+
+			if (after == 0x9a || after == 0xe8 || (after == 0x0e && data[crt0 + i + 7] == 0xe8))
+			{
+				return new MSCStartup(dataSegment, exe.ReadUInt16(crt0 + i + 3), exe.ReadUInt16(crt0 + i + 1),
+					crt0Segment, crt0Offset);
+			}
+		}
+
+		return null;
+	}
+
+	/// <summary>
 	/// Colonization is built with the same MicroSoft C overlay scheme as Civ1. Its sound drivers
 	/// are standalone MZ overlays with the same 512 byte header and 0000:0010 entry point as the
 	/// Civ1 .CVL drivers, so they go through the same overlay path.
@@ -40,6 +118,8 @@ internal class Program
 		if (!Directory.Exists(codePath))
 			Directory.CreateDirectory(codePath);
 
+		ProcessColonizationMain(codePath);
+
 		// Sound Drivers
 		TranslateOverlayToIL(ProcessOverlay("COLONIZE", "ASound", "ASOUND.COL", "ASnd", 0, codePath), "ASound", codePath);
 		TranslateOverlayToIL(ProcessOverlay("COLONIZE", "GSound", "GSOUND.COL", "GSnd", 0, codePath), "GSound", codePath);
@@ -47,6 +127,91 @@ internal class Program
 		TranslateOverlayToIL(ProcessOverlay("COLONIZE", "RSound", "RSOUND.COL", "RSnd", 0, codePath), "RSound", codePath);
 
 		Console.WriteLine("Processing finished");
+	}
+
+	/// <summary>
+	/// Disassembles VICEROY.EXE, the Colonization main executable.
+	/// </summary>
+	private static void ProcessColonizationMain(string codePath)
+	{
+		Console.WriteLine("* Loading VICEROY.EXE");
+
+		try
+		{
+			MZExecutable mainEXE = new(string.Format("GameSRC{0}COLONIZE{0}VICEROY.EXE",
+				Path.DirectorySeparatorChar));
+
+			MSCStartup? startup = FindMSCStartup(mainEXE);
+
+			if (startup == null)
+			{
+				Console.WriteLine("Warning: couldn't locate the MSC startup code in VICEROY.EXE");
+				return;
+			}
+
+			Console.WriteLine("DGROUP {0:x4}, main at {1:x4}:{2:x4}",
+				startup.DataSegment, startup.MainSegment, startup.MainOffset);
+
+			if (mainEXE.UnknownTrailingDataPosition >= 0)
+			{
+				Console.WriteLine("Overlays not loaded, unrecognised container at file offset 0x{0:x}",
+					mainEXE.UnknownTrailingDataPosition);
+			}
+
+			// no library matching yet, the runtime Colonization was linked against isn't identified
+			List<ModuleMatch> matches = [];
+			MainProgram mainProgram = new(mainEXE, matches, 0);
+			mainProgram.DefaultDS = startup.DataSegment;
+
+			Console.WriteLine("* Disassembling");
+
+			// An overlaid function is represented in the main image by a 10 byte thunk:
+			// CALL FAR <overlay manager>, then JMP FAR <segment 0000, overlay entry id>. The real
+			// body only exists inside the overlay container, which isn't decoded yet, so there is
+			// nothing to disassemble at the thunk itself.
+			int mainAddress = startup.MainSegment * 16 + startup.MainOffset;
+			bool mainIsOverlayThunk = mainAddress + 10 < mainEXE.Data.Length &&
+				mainEXE.Data[mainAddress] == 0x9a && mainEXE.Data[mainAddress + 5] == 0xea;
+
+			if (mainIsOverlayThunk)
+			{
+				Console.WriteLine("main() is an overlay thunk (JMP FAR {0:x4}:{1:x4}), its body lives in the overlay container",
+					mainEXE.ReadUInt16(mainAddress + 8), mainEXE.ReadUInt16(mainAddress + 6));
+				Console.WriteLine("Disassembling the startup code instead, that covers the code kept in the main image");
+
+				ProgramFunction start = mainProgram.Disassemble(0, startup.Crt0Segment, startup.Crt0Offset, "Start");
+				start.ReturnValue = new ILVariable(start, ILVariableScopeEnum.LocalParameter, mainProgram.IntValueType, 0, 10);
+			}
+			else
+			{
+				ProgramFunction function = mainProgram.Disassemble(0, startup.MainSegment, startup.MainOffset, "Main");
+				function.ReturnValue = new ILVariable(function, ILVariableScopeEnum.LocalParameter, mainProgram.IntValueType, 0, 10);
+			}
+
+			Console.WriteLine("* Writing code");
+
+			mainProgram.AssignOrdinals();
+
+			uint[] segmentOffsets = mainProgram.Segments.Keys.ToArray();
+			Array.Sort(segmentOffsets);
+
+			for (int i = 0; i < segmentOffsets.Length; i++)
+			{
+				mainProgram.Segments.GetValueByKey(segmentOffsets[i]).WriteAsmCS(codePath, 0);
+			}
+
+			Console.WriteLine("Main segments: {0}", segmentOffsets.Length);
+		}
+		catch (Exception ex)
+		{
+			Console.WriteLine($"Warning: VICEROY.EXE disassembly failed: {ex.Message}");
+
+			// a translator that says "not implemented" is expected, anything else is a bug
+			if (ex.GetType() != typeof(Exception))
+			{
+				Console.WriteLine(ex.StackTrace);
+			}
+		}
 	}
 
 	private static void ParseDOSEXE(string path, int version)

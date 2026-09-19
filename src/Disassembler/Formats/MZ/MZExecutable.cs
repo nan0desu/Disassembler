@@ -31,6 +31,8 @@
 		protected List<MZRelocationItem> relocations = new List<MZRelocationItem>();
 		// overlays
 		protected List<MZExecutable> overlays = new List<MZExecutable>();
+		// where the appended data stopped being a chain of MZ overlays, -1 when it never did
+		protected int unknownTrailingDataPosition = -1;
 
 		protected MZExecutable()
 		{ }
@@ -47,6 +49,17 @@
 			// load overlays
 			while (filePosition < stream.Length)
 			{
+				stream.Seek(filePosition, SeekOrigin.Begin);
+
+				// Civ1 appends its overlays as a chain of MZ images, Colonization appends them in
+				// some other container. Stop at the first chunk that isn't an MZ image and record
+				// where that was, rather than refusing to load the executable at all.
+				if (ReadUInt16(stream) != 0x5a4d)
+				{
+					this.unknownTrailingDataPosition = filePosition;
+					break;
+				}
+
 				MZExecutable overlay = new MZExecutable();
 				stream.Seek(filePosition, SeekOrigin.Begin);
 				filePosition += Read(stream, filePosition, overlay);
@@ -437,6 +450,16 @@
 		public List<MZExecutable> Overlays
 		{
 			get { return this.overlays; }
+		}
+
+		/// <summary>
+		/// File offset where the appended data stopped being a chain of MZ overlays, or -1 when
+		/// the whole file was consumed. Colonization keeps its overlays in a container this class
+		/// doesn't understand yet, so everything from here on has not been loaded.
+		/// </summary>
+		public int UnknownTrailingDataPosition
+		{
+			get { return this.unknownTrailingDataPosition; }
 		}
 	}
 }
