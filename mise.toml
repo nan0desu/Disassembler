@@ -1,2 +1,7 @@
 [tools]
 dotnet = "9"
+
+[env]
+# the SDK itself needs ICU, and this container has no libicu. The app doesn't need
+# this (see InvariantGlobalization in Disassembler.csproj), the dotnet CLI does.
+DOTNET_SYSTEM_GLOBALIZATION_INVARIANT = "1"

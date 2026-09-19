@@ -5,6 +5,8 @@
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- no libicu needed, everything we compare or upper case is ASCII (segment class names, opcode mnemonics) -->
+    <InvariantGlobalization>true</InvariantGlobalization>
 	<Title>The utility tool that disassembles and analyzes 16bit programs</Title>
 	<PackageProjectUrl>https://github.com/rajko-horvat/Disassembler</PackageProjectUrl>
     <RepositoryUrl>https://github.com/rajko-horvat/Disassembler</RepositoryUrl>
