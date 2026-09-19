@@ -4,6 +4,7 @@
 	public enum FlowGraphLocalEnum
 	{
 		None = 0,
+
 		// Registers
 		AL = 0x1,
 		AH = 0x2,
@@ -17,11 +18,14 @@
 		BX = BL | BH,
 		CX = CL | CH,
 		DX = DL | DH,
+		AX_DX = AX | DX,
 		SI = 0x100,
 		DI = 0x200,
+
 		// Stack registers
 		BP = 0x400,
 		SP = 0x800,
+
 		// Segments
 		CS = 0x1000,
 		SS = 0x2000,
@@ -29,6 +33,7 @@
 		ES = 0x8000,
 		FS = 0x10000,
 		GS = 0x20000,
+
 		// Flags
 		ZFlag = 0x100000,
 		CFlag = 0x200000,

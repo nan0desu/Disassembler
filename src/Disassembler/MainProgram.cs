@@ -19,15 +19,17 @@ namespace Disassembler
 
 		private MZExecutable executable;
 		private List<ModuleMatch> libraryMatches;
+		private int version = 0;
 		private BDictionary<uint, ProgramSegment> segments = new();
 		private uint defaultDS = 0;
 		private BDictionary<string, APIFunctionDefinition> apiFunctions = new();
 		private BDictionary<string, ILValueType> customValueTypes = new();
 
-		public MainProgram(MZExecutable executable, List<ModuleMatch> matches)
+		public MainProgram(MZExecutable executable, List<ModuleMatch> matches, int version)
 		{
 			this.executable = executable;
 			this.libraryMatches = matches;
+			this.version = version;
 
 			//MainProgramFunction function = new MainProgramFunction(this, MainProgramFunctionCallTypeEnum.Cdecl, "DivisionByZero", 
 			//	new List<Variable>(), CPUParameterSizeEnum.Undefined, 0, 0, 0);
@@ -193,6 +195,12 @@ namespace Disassembler
 				if (segment.CPUOverlay > 0)
 				{
 					segment.Ordinal = overlayOrdinal++;
+
+					if (this.version == 1 && overlayOrdinal == 15)
+					{
+						// skip overlay 14 for version 1
+						overlayOrdinal++;
+					}
 				}
 				else
 				{
@@ -242,6 +250,8 @@ namespace Disassembler
 				return this.libraryMatches;
 			}
 		}
+
+		public int Version { get { return this.version; } }
 
 		public BDictionary<uint, ProgramSegment> Segments
 		{

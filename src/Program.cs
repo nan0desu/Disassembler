@@ -4,6 +4,7 @@ using Disassembler.Formats.MZ;
 using Disassembler.Formats.OMF;
 using IRB.Collections.Generic;
 using System.Reflection;
+using System.Text.RegularExpressions;
 
 internal class Program
 {
@@ -20,16 +21,15 @@ internal class Program
 
 	private static void ParseDOSEXE(string path, int version)
 	{
+		List<DataMatch> dataMatches = new();
+
 		string outputPath = path + $"{Path.DirectorySeparatorChar}Output";
 		string codePath = outputPath + $"{Path.DirectorySeparatorChar}Code{version}";
-		string dataPath = outputPath + $"{Path.DirectorySeparatorChar}Data{version}";
 
 		if (!Directory.Exists(outputPath))
 			Directory.CreateDirectory(outputPath);
 		if (!Directory.Exists(codePath))
 			Directory.CreateDirectory(codePath);
-		if (!Directory.Exists(dataPath))
-			Directory.CreateDirectory(dataPath);
 
 		// process Main code
 		Console.WriteLine("* Loading EXE");
@@ -67,10 +67,153 @@ internal class Program
 			throw new Exception("File is corrupted");
 		}
 
+		if (version == 1)
+		{
+			dataMatches.Add(new(0x2667, 7, 0x1a7));
+			dataMatches.Add(new(0x280e, 0xb0, 0x38));
+			dataMatches.Add(new(0x2846, 0x18, 0x60));
+			dataMatches.Add(new(0x28a6, 0x50, 0x2812));
+			dataMatches.Add(new(0x50b8, 0x5e, 0x11fe));
+			dataMatches.Add(new(0x62b6, 0x60, 0x121));
+			dataMatches.Add(new(0x63d7, 0x7c, 0x6d9)); // four bytes are unaccounted for
+
+			/*MZExecutable mainEXE1 = new(string.Format("..{0}..{0}..{0}..{0}..{0}..{0}Games{0}Civilization{0}Civ I{0}Dos{0}CIV{1}.EXE",
+				Path.DirectorySeparatorChar, 3));
+
+			int baseAddress1 = mainEXE1.InitialCS * 16;
+			ushort newDS1 = mainEXE1.ReadUInt16(baseAddress1 + mainEXE1.InitialIP + 0x2);
+			ushort newSP1 = mainEXE1.InitialSP;
+			ushort tempIP1 = mainEXE1.ReadUInt16(baseAddress1 + mainEXE1.InitialIP + 0x4f);
+			ushort dataCutoffOffset1 = 0;
+
+			if (mainEXE1.Data[baseAddress1 + tempIP1 + 0x1f] == 0x81 && mainEXE1.Data[baseAddress1 + tempIP1 + 0x20] == 0xc4 &&
+				mainEXE1.Data[baseAddress1 + tempIP1 + 0x67] == 0x16 && mainEXE1.Data[baseAddress1 + tempIP1 + 0x68] == 0x7 &&
+				mainEXE1.Data[baseAddress1 + tempIP1 + 0x69] == 0xfc && mainEXE1.Data[baseAddress1 + tempIP1 + 0x6a] == 0xbf &&
+				mainEXE1.Data[baseAddress1 + tempIP1 + 0x97] == 0x9a)
+			{
+				// we have the correct offset
+				newSP1 += mainEXE1.ReadUInt16(baseAddress1 + tempIP1 + 0x21);
+				newSP1 &= 0xfffe;
+
+				// This is the offset where data segment gets filled with zeroes
+				dataCutoffOffset1 = mainEXE1.ReadUInt16(baseAddress1 + tempIP1 + 0x6b);
+			}
+			else
+			{
+				throw new Exception("File is corrupted");
+			}
+
+			// extract data blocks
+			int dataLength1 = Math.Min(mainEXE.Data.Length - (int)MainProgram.ToLinearAddress(newDS, 0), 0xe000);
+			int dataLength3 = Math.Min(mainEXE1.Data.Length - (int)MainProgram.ToLinearAddress(newDS1, 0), 0xe000);
+			byte[] data1 = new byte[dataLength1];
+			byte[] data3 = new byte[dataLength3];
+
+			Array.Copy(mainEXE.Data, (int)MainProgram.ToLinearAddress(newDS, 0), data1, 0, dataLength1);
+			Array.Copy(mainEXE1.Data, (int)MainProgram.ToLinearAddress(newDS1, 0), data3, 0, dataLength3);
+
+			// calculate differences between data blocks
+			// we want to normalize data positions from v1 to v3
+			int dataPos1 = 0;
+			int dataOffset1 = 0;
+			int dataPos3 = 0;
+
+			for (dataPos1 = 0, dataPos3 = 0; dataPos1 < dataLength1 && dataPos3 < dataLength3; dataPos1++, dataPos3++)
+			{
+				if (data1[dataPos1] != data3[dataPos3])
+				{
+					Console.Write($"Difference encountered at position 0x{dataPos1:x04}, ");
+
+					// try to consilidate positions
+					bool adjusted = false;
+
+					for (int i = 0; i < 128; i++)
+					{
+						bool blockMatched = true;
+
+						for (int j = 0; j < 4; j++)
+						{
+							if ((dataPos3 + i + j) >= dataLength3 || dataPos1 + j >= dataLength1 || data1[dataPos1 + j] != data3[dataPos3 + i + j])
+							{
+								blockMatched = false;
+								break;
+							}
+						}
+
+						if (blockMatched)
+						{
+							dataOffset1 += i;
+							dataPos3 += i;
+							adjusted = true;
+							break;
+						}
+					}
+
+					if (adjusted)
+					{
+						Console.WriteLine($"Offset readjusted to 0x{dataOffset1:x04} at position 0x{dataPos1:x04}");
+					}
+					else
+					{
+						Console.WriteLine($"Byte ignored at position 0x{dataPos1:x04}");
+					}
+				}
+			}*/
+
+			/*Console.WriteLine("Saving data segment");
+			int dataLength1 = Math.Min(mainEXE.Data.Length - (int)MainProgram.ToLinearAddress(newDS, 0), 0xe000);
+			byte[] data1Old = new byte[dataLength1];
+			byte[] data1New = new byte[1];
+
+			Array.Copy(mainEXE.Data, (int)MainProgram.ToLinearAddress(newDS, 0), data1Old, 0, dataLength1);
+
+			if (dataMatches.Count > 0 && dataMatches[0].Offset > 0)
+			{
+				DataMatch match = dataMatches[0];
+
+				Array.Resize<byte>(ref data1New, match.Position);
+
+				for (int j = 0; j < match.Position; j++)
+				{
+					data1New[j] = data1Old[j];
+				}
+			}
+
+			for (int i = 0; i < dataMatches.Count; i++)
+			{
+				DataMatch match = dataMatches[i];
+				int oldPos = match.Position;
+				int newPos = match.Position + match.Offset;
+
+				if (data1New.Length < newPos + match.Length)
+				{
+					Array.Resize<byte>(ref data1New, newPos + match.Length);
+
+					for (int j = 0; j < match.Length; j++)
+					{
+						data1New[newPos + j] = 0xff;
+					}
+				}
+
+				for (int j = 0; j < match.Length; j++)
+				{
+					data1New[newPos + j] = data1Old[oldPos + j];
+				}
+			}
+
+			FileStream dataFile1 = new($"{outputPath}/Data{version}Old.bin", FileMode.Create, FileAccess.ReadWrite);
+			dataFile1.Write(data1Old, 0, data1Old.Length);
+			dataFile1.Close();
+
+			dataFile1 = new($"{outputPath}/Data{version}New.bin", FileMode.Create, FileAccess.ReadWrite);
+			dataFile1.Write(data1New, 0, data1New.Length);
+			dataFile1.Close();*/
+		}
+
 		Console.WriteLine("Saving data segment");
-		FileStream dataFile = new($"{dataPath}/Data.bin", FileMode.Create, FileAccess.ReadWrite);
-		int length = Math.Min(mainEXE.Data.Length - (int)MainProgram.ToLinearAddress(newDS, 0), newSP - 1);
-		dataFile.Write(mainEXE.Data, (int)MainProgram.ToLinearAddress(newDS, 0), length);
+		FileStream dataFile = new($"{outputPath}/Data{version}.bin", FileMode.Create, FileAccess.ReadWrite);
+		dataFile.Write(mainEXE.Data, (int)MainProgram.ToLinearAddress(newDS, 0),
+			Math.Min(mainEXE.Data.Length - (int)MainProgram.ToLinearAddress(newDS, 0), newSP - 1));
 		dataFile.Close();
 
 		Console.WriteLine("Loading library MLIBC7");
@@ -117,7 +260,7 @@ internal class Program
 		Console.WriteLine("* Matching MLIBC7");
 		OMFLibrary.MatchLibrary(library1, mainEXE, libraryMatches);
 
-		MainProgram mainProgram = new(mainEXE, libraryMatches);
+		MainProgram mainProgram = new(mainEXE, libraryMatches, version);
 		mainProgram.DefaultDS = newDS;
 		
 		Console.WriteLine("Library modules count {1}, matches {0}", libraryMatches.Count, library1.Modules.Count);
@@ -580,6 +723,7 @@ internal class Program
 				mainProgram.Disassemble(0, 0x0866, 0x13a9, null);
 				mainProgram.Disassemble(0, 0x0866, 0x13f8, null);
 				mainProgram.Disassemble(0, 0x0866, 0x14a2, null);
+				mainProgram.Disassemble(0, 0x0866, 0x1560, null);
 				mainProgram.Disassemble(0, 0x0866, 0x1610, null);
 				mainProgram.Disassemble(0, 0x0866, 0x1676, null);
 
@@ -627,8 +771,8 @@ internal class Program
 		
 		Console.WriteLine("* Emitting flow graphs");
 		// Emit flow graphs
-		uint ilSegment = 0x181;
-		ushort ilFunction = 0x14a;
+		/*uint ilSegment = 0x181;
+		ushort ilFunction = 0x136;
 
 		if (mainProgram.Segments.ContainsKey(ilSegment))
 		{
@@ -645,7 +789,7 @@ internal class Program
 					Console.WriteLine("Func {0} exists, writed test.gv", ilFunction);
 				}
             }
-		}
+		}*/
 
 		//Console.WriteLine();
 		Console.WriteLine("* Translating code to IL");
@@ -666,7 +810,7 @@ internal class Program
 			Path.DirectorySeparatorChar));
 
 		List<ModuleMatch> aMatchesMisc = [];
-		Disassembler.MainProgram oMiscDisassembler = new Disassembler.MainProgram(oMiscEXE, aMatchesMisc);
+		Disassembler.MainProgram oMiscDisassembler = new Disassembler.MainProgram(oMiscEXE, aMatchesMisc, version);
 
 		oMiscDisassembler.DisassembleOverlay();
 		oMiscDisassembler.AssignOrdinals();
@@ -691,7 +835,7 @@ internal class Program
 				Path.DirectorySeparatorChar));
 
 			List<ModuleMatch> aMatchesMGA = [];
-			Disassembler.MainProgram oVGADisassembler = new Disassembler.MainProgram(oVGAEXE, aMatchesMGA);
+			Disassembler.MainProgram oVGADisassembler = new Disassembler.MainProgram(oVGAEXE, aMatchesMGA, version);
 
 			oVGADisassembler.DisassembleOverlay();
 			oVGADisassembler.AssignOrdinals();
@@ -719,7 +863,7 @@ internal class Program
 			Path.DirectorySeparatorChar));
 
 		List<ModuleMatch> aMatchesNS = [];
-		Disassembler.MainProgram oNSoundDisassembler = new Disassembler.MainProgram(oNSEXE, aMatchesNS);
+		Disassembler.MainProgram oNSoundDisassembler = new Disassembler.MainProgram(oNSEXE, aMatchesNS, version);
 
 		oNSoundDisassembler.DisassembleOverlay();
 		oNSoundDisassembler.AssignOrdinals();
@@ -742,7 +886,7 @@ internal class Program
 			Path.DirectorySeparatorChar));
 
 		List<ModuleMatch> aMatchesGS = [];
-		Disassembler.MainProgram oGSoundDisassembler = new Disassembler.MainProgram(oGSoundEXE, aMatchesGS);
+		Disassembler.MainProgram oGSoundDisassembler = new Disassembler.MainProgram(oGSoundEXE, aMatchesGS, version);
 
 		oGSoundDisassembler.DisassembleOverlay();
 		oGSoundDisassembler.AssignOrdinals();

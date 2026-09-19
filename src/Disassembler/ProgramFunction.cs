@@ -16,8 +16,8 @@ namespace Disassembler
 		private ProgramFunctionOptionsEnum functionOptions = ProgramFunctionOptionsEnum.Cdecl;
 		private ILVariable returnValue;
 		private int stackSize = 0;
-		private BDictionary<int, ILVariable> localParameters = new BDictionary<int, ILVariable>();
-		private BDictionary<int, ILVariable> localVariables = new BDictionary<int, ILVariable>();
+		private BDictionary<int, ILVariable> localParameters = new();
+		private BDictionary<int, ILVariable> localVariables = new();
 		private int localVariableSize = 0;
 		private int localVariablePosition = 6;
 
@@ -211,6 +211,16 @@ namespace Disassembler
 									instruction1.Parameters[0].Size == CPUParameterSizeEnum.UInt8 &&
 									instruction1.Parameters[0].Value == (uint)CPURegisterEnum.AH &&
 									instruction1.Parameters[1].Type == CPUParameterTypeEnum.Immediate &&
+									instruction1.Parameters[1].Value == 0x0)
+								{
+									// exit application instruction
+									bEnd = true;
+								}
+								else if (instruction1.Parameters.Count > 1 &&
+									instruction1.Parameters[0].Type == CPUParameterTypeEnum.Register &&
+									instruction1.Parameters[0].Size == CPUParameterSizeEnum.UInt8 &&
+									instruction1.Parameters[0].Value == (uint)CPURegisterEnum.AH &&
+									instruction1.Parameters[1].Type == CPUParameterTypeEnum.Immediate &&
 									instruction1.Parameters[1].Value == 0x4c)
 								{
 									// exit application instruction
@@ -236,6 +246,7 @@ namespace Disassembler
 								Console.WriteLine($"Inconsistent function return type in {this.parentSegment.Name}.{this.Name}");
 							}
 							this.functionOptions |= ProgramFunctionOptionsEnum.Near;
+							this.functionOptions |= ProgramFunctionOptionsEnum.Return;
 
 							if (instruction.Parameters.Count == 1 && (this.functionOptions & ProgramFunctionOptionsEnum.Cdecl) == ProgramFunctionOptionsEnum.Cdecl)
 							{
@@ -265,6 +276,7 @@ namespace Disassembler
 								Console.WriteLine($"Inconsistent function return type in {this.parentSegment.Name}.{this.Name}");
 							}
 							this.functionOptions |= ProgramFunctionOptionsEnum.Far;
+							this.functionOptions |= ProgramFunctionOptionsEnum.Return;
 
 							if (instruction.Parameters.Count == 1 && (this.functionOptions & ProgramFunctionOptionsEnum.Cdecl) == ProgramFunctionOptionsEnum.Cdecl)
 							{
@@ -289,11 +301,14 @@ namespace Disassembler
 							break;
 
 						case CPUInstructionEnum.IRET:
-							if ((this.functionOptions & ProgramFunctionOptionsEnum.Near) == ProgramFunctionOptionsEnum.Near)
+							if ((this.functionOptions & ProgramFunctionOptionsEnum.Near) == ProgramFunctionOptionsEnum.Near ||
+								(this.functionOptions & ProgramFunctionOptionsEnum.Pascal) == ProgramFunctionOptionsEnum.Pascal)
 							{
-								Console.WriteLine($"Inconsistent function return type in {this.parentSegment.Name}.{this.Name}");
+								Console.WriteLine($"Inconsistent function call type in {this.parentSegment.Name}.{this.Name}");
 							}
 							this.functionOptions |= ProgramFunctionOptionsEnum.Far;
+							this.functionOptions |= ProgramFunctionOptionsEnum.Interrupt;
+							this.functionOptions |= ProgramFunctionOptionsEnum.Return;
 
 							bEnd = true;
 							break;
@@ -487,36 +502,14 @@ namespace Disassembler
 			}
 
 			stream.Close();
-
-			this.asmInstructions.Sort((item1, item2) => item1.LinearAddress.CompareTo(item2.LinearAddress));
 			#endregion
 
-			#region Find ret instruction and create one if it doesn't exist
-			CPUInstruction? retInstruction = null;
-			ushort lastInstructionOffset = 0;
+			#region Sort instructions by their address and asign them their ordinal to use when inserting and removing instructions
+			this.asmInstructions.Sort((item1, item2) => item1.LinearAddress.CompareTo(item2.LinearAddress));
 
 			for (int i = 0; i < this.asmInstructions.Count; i++)
 			{
-				CPUInstruction instruction = this.asmInstructions[i];
-
-				lastInstructionOffset = Math.Max(lastInstructionOffset, instruction.Offset);
-
-				if (instruction.InstructionType == CPUInstructionEnum.RET ||
-					instruction.InstructionType == CPUInstructionEnum.RETF ||
-					instruction.InstructionType == CPUInstructionEnum.IRET)
-				{
-					retInstruction = instruction;
-					break;
-				}
-			}
-
-			if (retInstruction == null)
-			{
-				// it the function doesn't have return instruction, we will append it as it's required for further analysis
-				retInstruction = new CPUInstruction(this.parentSegment.CPUSegment, (ushort)(lastInstructionOffset + 1), CPUInstructionEnum.RETF, CPUParameterSizeEnum.UInt16);
-				this.asmInstructions.Add(retInstruction);
-
-				Console.WriteLine($"Warning, the function {this.parentSegment.Name}.{this.Name} doesn't have return instruction, adding one.");
+				this.asmInstructions[i].InstructionOrdinal = i;
 			}
 			#endregion
 
@@ -666,6 +659,7 @@ namespace Disassembler
 			for (int i = 0; i < this.asmInstructions.Count; i++)
 			{
 				CPUInstruction instruction = this.asmInstructions[i];
+				CPUInstruction instruction1;
 				CPUParameter parameter;
 				uint newAddress;
 
@@ -687,7 +681,9 @@ namespace Disassembler
 							}
 							else
 							{
-								this.asmInstructions[GetInstructionPositionByLinearAddress(newAddress)].Label = true;
+								instruction1 = this.asmInstructions[GetInstructionPositionByLinearAddress(newAddress)];
+								instruction1.Label = true;
+								instruction1.ReferenceCount++;
 							}
 						}
 						break;
@@ -701,14 +697,18 @@ namespace Disassembler
 
 							if (newAddress != 0)
 							{
-								this.asmInstructions[GetInstructionPositionByLinearAddress(newAddress)].Label = true;
+								instruction1 = this.asmInstructions[GetInstructionPositionByLinearAddress(newAddress)];
+								instruction1.Label = true;
+								instruction1.ReferenceCount++;
 							}
 						}
 						break;
 
 					case CPUInstructionEnum.Jcc:
 						newAddress = (ushort)instruction.Parameters[1].Value;
-						this.asmInstructions[GetInstructionPositionByLinearAddress((uint)(fnSegment + newAddress))].Label = true;
+						instruction1 = this.asmInstructions[GetInstructionPositionByLinearAddress((uint)(fnSegment + newAddress))];
+						instruction1.Label = true;
+						instruction1.ReferenceCount++;
 						break;
 
 					case CPUInstructionEnum.LOOP:
@@ -716,7 +716,9 @@ namespace Disassembler
 					case CPUInstructionEnum.LOOPNE:
 					case CPUInstructionEnum.JCXZ:
 						newAddress = (ushort)(instruction.Parameters[0].Value & 0xffff);
-						this.asmInstructions[GetInstructionPositionByLinearAddress((uint)(fnSegment + newAddress))].Label = true;
+						instruction1 = this.asmInstructions[GetInstructionPositionByLinearAddress((uint)(fnSegment + newAddress))];
+						instruction1.Label = true;
+						instruction1.ReferenceCount++;
 						break;
 
 					case CPUInstructionEnum.SWITCH:
@@ -724,7 +726,9 @@ namespace Disassembler
 						{
 							parameter = instruction.Parameters[j];
 
-							this.asmInstructions[GetInstructionPositionByLinearAddress((uint)(fnSegment + parameter.Displacement))].Label = true;
+							instruction1 = this.asmInstructions[GetInstructionPositionByLinearAddress((uint)(fnSegment + parameter.Displacement))];
+							instruction1.Label = true;
+							instruction1.ReferenceCount++;
 						}
 						break;
 				}
@@ -991,77 +995,16 @@ namespace Disassembler
 			}
 			#endregion
 
-			#region Append goto instruction after INT exit instruction(s) and after indirect JMP(F)
-			for (int i = 0; i < this.asmInstructions.Count; i++)
-			{
-				CPUInstruction instruction = this.asmInstructions[i];
-				CPUInstruction instruction1;
-
-				if (instruction.InstructionType == CPUInstructionEnum.INT)
-				{
-					if (instruction.Parameters[0].Type == CPUParameterTypeEnum.Immediate &&
-						instruction.Parameters[0].Value == 0x20)
-					{
-						// exit application instruction
-						instruction1 = new CPUInstruction(instruction.Segment, 0, CPUInstructionEnum.JMP, instruction.DefaultSize);
-						instruction1.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Immediate, retInstruction.Offset));
-
-						this.asmInstructions.Insert(i + 1, instruction1);
-						retInstruction.Label = true;
-						i++;
-					}
-					else if (i > 2)
-					{
-						instruction1 = this.asmInstructions[this.asmInstructions.Count - 2];
-
-						if (instruction1.Parameters.Count > 1 &&
-							instruction1.Parameters[0].Type == CPUParameterTypeEnum.Register &&
-							instruction1.Parameters[0].Size == CPUParameterSizeEnum.UInt8 &&
-							instruction1.Parameters[0].Value == (uint)CPURegisterEnum.AH &&
-							instruction1.Parameters[1].Type == CPUParameterTypeEnum.Immediate &&
-							instruction1.Parameters[1].Value == 0x4c)
-						{
-							// exit application instruction
-							instruction1 = new CPUInstruction(instruction.Segment, 0, CPUInstructionEnum.JMP, instruction.DefaultSize);
-							instruction1.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Immediate, retInstruction.Offset));
-
-							this.asmInstructions.Insert(i + 1, instruction1);
-							retInstruction.Label = true;
-							i++;
-						}
-						else if (instruction1.Parameters.Count > 1 &&
-							instruction1.Parameters[0].Type == CPUParameterTypeEnum.Register &&
-							instruction1.Parameters[0].Size == CPUParameterSizeEnum.UInt16 &&
-							instruction1.Parameters[0].Value == (uint)CPURegisterEnum.AX &&
-							instruction1.Parameters[1].Type == CPUParameterTypeEnum.Immediate &&
-							(instruction1.Parameters[1].Value & 0xff00) == 0x4c00)
-						{
-							// exit application instruction
-							instruction1 = new CPUInstruction(instruction.Segment, 0, CPUInstructionEnum.JMP, instruction.DefaultSize);
-							instruction1.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Immediate, retInstruction.Offset));
-
-							this.asmInstructions.Insert(i + 1, instruction1);
-							retInstruction.Label = true;
-							i++;
-						}
-					}
-				}
-				else if ((instruction.InstructionType == CPUInstructionEnum.JMP && instruction.Parameters[0].Type != CPUParameterTypeEnum.Immediate) ||
-					(instruction.InstructionType == CPUInstructionEnum.JMPF && instruction.Parameters[0].Type != CPUParameterTypeEnum.SegmentOffset))
-				{
-					instruction1 = new CPUInstruction(instruction.Segment, 0, CPUInstructionEnum.JMP, instruction.DefaultSize);
-					instruction1.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Immediate, retInstruction.Offset));
-
-					this.asmInstructions.Insert(i + 1, instruction1);
-					retInstruction.Label = true;
-					i++;
-				}
-			}
-			#endregion
-
 			#region Assign ordinals to labels
 
-			if (this.asmInstructions.Count > 0 && this.fnEntryPoint != this.asmInstructions[0].LinearAddress)
+			int startPos = 0;
+
+			while (startPos < this.asmInstructions.Count && this.asmInstructions[startPos].InstructionType == CPUInstructionEnum.Remark)
+			{
+				startPos++;
+			}
+
+			if (this.asmInstructions.Count > 0 && this.fnEntryPoint != this.asmInstructions[startPos].LinearAddress)
 			{
 				CPUInstruction? instruction = GetInstructionByLinearAddress(this.fnEntryPoint);
 
@@ -1124,7 +1067,280 @@ namespace Disassembler
 			}
 			#endregion
 
+			#region Find multiple different Return instructions and add a fixup warning to them
+			int retCount = 0;
+			int retfCount = 0;
+			int iretCount = 0;
+
+			for (int i = 0; i < this.asmInstructions.Count; i++)
+			{
+				CPUInstruction instruction = this.asmInstructions[i];
+
+				switch (instruction.InstructionType)
+				{
+					case CPUInstructionEnum.RET:
+						retCount++;
+						break;
+
+					case CPUInstructionEnum.RETF:
+						retfCount++;
+						break;
+
+					case CPUInstructionEnum.IRET:
+						iretCount++;
+						break;
+				}
+			}
+
+			if ((retCount > 0 && (retfCount + iretCount) > 0) ||
+				(retfCount > 0 && (retCount + iretCount) > 0) ||
+				(iretCount > 0 && (retCount + retfCount) > 0))
+			{
+				for (int i = 0; i < this.asmInstructions.Count; i++)
+				{
+					CPUInstruction instruction = this.asmInstructions[i];
+
+					switch (instruction.InstructionType)
+					{
+						case CPUInstructionEnum.RET:
+						case CPUInstructionEnum.RETF:
+						case CPUInstructionEnum.IRET:
+							int newOrdinal = instruction.InstructionOrdinal;
+
+							this.AddInstruction(newOrdinal,
+								new CPUInstruction(newOrdinal, "Function fixup needed, there are multiple function return type instructions"));
+
+							newOrdinal++;
+							i++;
+							break;
+					}
+				}
+			}
+			#endregion
+
+			#region Replace Absolute Jumps to 0 with Calls to variable functions
+			for (int i = 0; i < this.asmInstructions.Count; i++)
+			{
+				CPUInstruction instruction = this.asmInstructions[i];
+				CPUParameter parameter;
+
+				switch (instruction.InstructionType)
+				{
+					case CPUInstructionEnum.JMPF:
+						parameter = instruction.Parameters[0];
+						if (parameter.Type == CPUParameterTypeEnum.SegmentOffset)
+						{
+							fnAddress = MainProgram.ToLinearAddress(parameter.Segment, parameter.Value);
+
+							if (fnAddress == 0)
+							{
+								int newOrdinal = instruction.InstructionOrdinal;
+
+								this.AddInstruction(newOrdinal,
+									new CPUInstruction(newOrdinal, "Function fixup needed, the calling stack is out of aligment"));
+
+								newOrdinal++;
+								i++;
+
+								this.AddInstruction(newOrdinal, 
+									new CPUInstruction(newOrdinal, $"Call to variable function. Address of a call is located at {this.parentSegment}:0x{(instruction.Offset + 1):x4}"));
+
+								newOrdinal++;
+								i++;
+							}
+						}
+						break;
+				}
+			}
+			#endregion
+
+			#region Translate inline If statements
+			for (int i = 0; i < this.asmInstructions.Count; i++)
+			{
+				int iPos1 = i;
+				CPUInstruction instruction = this.asmInstructions[i];
+				CPUInstruction instruction1;
+				uint jumpOffset1;
+				uint jumpOffset2;
+				CPUJumpConditionEnum condition;
+				CPURegisterEnum register;
+				CPUParameterSizeEnum registerSize;
+				uint value1;
+				uint value2;
+
+				if (iPos1 + 4 < this.asmInstructions.Count)
+				{
+					switch (instruction.InstructionType)
+					{
+						case CPUInstructionEnum.Jcc:
+							if ((instruction1 = this.asmInstructions[iPos1]).InstructionType == CPUInstructionEnum.Jcc &&
+							instruction1.Parameters.Count == 2 &&
+							instruction1.Parameters[0].Type == CPUParameterTypeEnum.Condition &&
+							(condition = (CPUJumpConditionEnum)instruction1.Parameters[0].Value) != CPUJumpConditionEnum.Undefined &&
+							instruction1.Parameters[1].Type == CPUParameterTypeEnum.Immediate &&
+							(jumpOffset1 = instruction1.Parameters[1].Value) >= 0 &&
+
+							(instruction1 = this.asmInstructions[++iPos1]).InstructionType == CPUInstructionEnum.MOV &&
+							!instruction1.Label &&
+							instruction1.Parameters.Count == 2 &&
+							instruction1.Parameters[0].Type == CPUParameterTypeEnum.Register &&
+							(register = instruction1.Parameters[0].RegisterValue) >= 0 &&
+							(registerSize = instruction1.Parameters[0].Size) >= 0 &&
+							instruction1.Parameters[1].Type == CPUParameterTypeEnum.Immediate &&
+							(value1 = instruction1.Parameters[1].Value) >= 0 &&
+
+							(instruction1 = this.asmInstructions[++iPos1]).InstructionType == CPUInstructionEnum.JMP &&
+							!instruction1.Label &&
+							instruction1.Parameters.Count == 1 &&
+							instruction1.Parameters[0].Type == CPUParameterTypeEnum.Immediate &&
+							(jumpOffset2 = instruction1.Parameters[0].Value) >= 0 &&
+
+							(instruction1 = this.asmInstructions[++iPos1]).InstructionType == CPUInstructionEnum.MOV &&
+							instruction1.Label &&
+							instruction1.ReferenceCount == 1 &&
+							instruction1.Offset == jumpOffset1 &&
+							instruction1.Parameters.Count == 2 &&
+							instruction1.Parameters[0].Type == CPUParameterTypeEnum.Register &&
+							instruction1.Parameters[0].Size == registerSize &&
+							instruction1.Parameters[0].RegisterValue == register &&
+							instruction1.Parameters[1].Type == CPUParameterTypeEnum.Immediate &&
+							(value2 = instruction1.Parameters[1].Value) >= 0 &&
+
+							(instruction1 = this.asmInstructions[++iPos1]).Label &&
+							instruction1.Offset == jumpOffset2)
+							{
+								//Console.Write("");
+								instruction1 = this.asmInstructions[i];
+								instruction1.InstructionType = CPUInstructionEnum.IIf;
+								instruction1.OperandSize = registerSize;
+								instruction1.Parameters.Clear();
+
+								instruction1.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Register, (CPUParameterSizeEnum)registerSize, (uint)register));
+								instruction1.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Condition, (uint)condition));
+								instruction1.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Immediate, (CPUParameterSizeEnum)registerSize, (uint)value2));
+								instruction1.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Immediate, (CPUParameterSizeEnum)registerSize, (uint)value1));
+
+								RemoveInstruction(instruction1.InstructionOrdinal + 1);
+								RemoveInstruction(instruction1.InstructionOrdinal + 1);
+								RemoveInstruction(instruction1.InstructionOrdinal + 1);
+
+								// adjust next instruction reference count
+								instruction1 = this.asmInstructions[i + 1];
+								if (instruction1.ReferenceCount == 1)
+								{
+									instruction1.Label = false;
+								}
+								instruction1.ReferenceCount--;
+							}
+							break;
+					}
+				}
+			}
+			#endregion
+
 			this.flowGraph = new FlowGraph(this, this.Name);
+
+			#region Check If statements, but only for non assembly functions
+			if (this.flowGraph.HasBPFrame)
+			{
+				for (int i = 0; i < this.asmInstructions.Count; i++)
+				{
+					CPUInstruction instruction = this.asmInstructions[i];
+					CPUInstruction instruction1;
+
+					switch (instruction.InstructionType)
+					{
+						case CPUInstructionEnum.Jcc:
+							if (!instruction.Label && i > 0)
+							{
+								int count = 0;
+								int pos = i - 1;
+								CPUJumpConditionEnum condition;
+
+								instruction1 = this.asmInstructions[pos];
+
+								// search backwards for compare instruction up to 3 instruction before main jcc instruction
+								while (count < 3 && pos >= 0 && (instruction1 = this.asmInstructions[pos]).InstructionType == CPUInstructionEnum.Jcc)
+								{
+									if (instruction1.Label)
+									{
+										Console.WriteLine($"Detected label while searching for Jcc compare instruction in function {this.parentSegment.Name}.{this.Name}, 0x{fnAddress:x}");
+										pos = -1;
+										break;
+									}
+
+									pos--;
+									count++;
+								}
+
+								if (pos != i - 1)
+								{
+									Console.WriteLine($"Adjusted position to {instruction1} on {instruction}");
+								}
+
+								if (pos >= 0)
+								{
+									switch (instruction1.InstructionType)
+									{
+										case CPUInstructionEnum.CMP:
+											break;
+
+										case CPUInstructionEnum.TEST:
+											break;
+
+										case CPUInstructionEnum.AND:
+											break;
+
+										case CPUInstructionEnum.OR:
+											break;
+
+										case CPUInstructionEnum.XOR:
+											break;
+
+										case CPUInstructionEnum.ADD:
+											break;
+
+										case CPUInstructionEnum.SUB:
+											break;
+
+										case CPUInstructionEnum.INC:
+											break;
+
+										case CPUInstructionEnum.DEC:
+											break;
+
+										case CPUInstructionEnum.INT:
+											if (instruction.Parameters[0].Type == CPUParameterTypeEnum.Condition &&
+												((condition = (CPUJumpConditionEnum)instruction.Parameters[0].Value) == CPUJumpConditionEnum.B ||
+												condition == CPUJumpConditionEnum.AE))
+											{
+												Console.WriteLine($"'{instruction1}' before '{instruction}' in function {this.parentSegment.Name}.{this.Name}, 0x{fnAddress:x}");
+											}
+											else
+											{
+												Console.WriteLine($"Instruction '{instruction1}' precedes '{instruction}' in function {this.parentSegment.Name}.{this.Name}, 0x{fnAddress:x}");
+											}
+											break;
+
+										default:
+											Console.WriteLine($"Instruction '{instruction1}' precedes '{instruction}' in function {this.parentSegment.Name}.{this.Name}, 0x{fnAddress:x}");
+											break;
+									}
+								}
+							}
+							else if (instruction.Label)
+							{
+								Console.WriteLine($"Label on Jcc instruction in function {this.parentSegment.Name}.{this.Name}, 0x{fnAddress:x}");
+							}
+							else
+							{
+								throw new Exception($"Jcc instruction is first in function {this.parentSegment.Name}.{this.Name}, 0x{fnAddress:x}");
+							}
+							break;
+					}
+				}
+			}
+			#endregion
 
 			#region Process calls to other functions
 			for (int i = 0; i < this.asmInstructions.Count; i++)
@@ -1297,6 +1513,92 @@ namespace Disassembler
 			return -1;
 		}
 
+		public int AddInstruction(int ordinal, CPUInstruction instruction)
+		{
+			bool found = false;
+			int position = -1;
+
+			for (int i = 0; i < this.asmInstructions.Count; i++)
+			{
+				if (this.asmInstructions[i].InstructionOrdinal == ordinal)
+				{
+					found = true;
+					position = i;
+				}
+			}
+
+			if (found)
+			{
+				// Insert instruction
+				for (int i = 0; i < this.asmInstructions.Count; i++)
+				{
+					if (this.asmInstructions[i].InstructionOrdinal >= ordinal)
+					{
+						this.asmInstructions[i].InstructionOrdinal++;
+					}
+				}
+
+				instruction.InstructionOrdinal = ordinal;
+				this.asmInstructions.Insert(position, instruction);
+			}
+			else
+			{
+				// Append instruction
+				for (int i = 0; i < this.asmInstructions.Count; i++)
+				{
+					if (this.asmInstructions[i].InstructionOrdinal >= ordinal)
+					{
+						ordinal = this.asmInstructions[i].InstructionOrdinal;
+					}
+				}
+
+				ordinal++;
+				instruction.InstructionOrdinal = ordinal;
+				this.asmInstructions.Add(instruction);
+			}
+
+			return ordinal;
+		}
+
+		public bool RemoveInstruction(int ordinal)
+		{
+			bool found = false;
+			int position = -1;
+
+			for (int i = 0; i < this.asmInstructions.Count; i++)
+			{
+				if (this.asmInstructions[i].InstructionOrdinal == ordinal)
+				{
+					found = true;
+					position = i;
+				}
+			}
+
+			if (found)
+			{
+				this.asmInstructions.RemoveAt(position);
+
+				for (int i = 0; i < this.asmInstructions.Count; i++)
+				{
+					if (this.asmInstructions[i].InstructionOrdinal >= ordinal)
+					{
+						this.asmInstructions[i].InstructionOrdinal--;
+					}
+				}
+			}
+
+			return found;
+		}
+
+		public ILLocalVariableReference GetNewLocalVariable(ILValueType valueType)
+		{
+			ILVariable newVariable = new ILVariable(this, valueType, this.localVariablePosition);
+
+			this.localVariablePosition++;
+
+			return new ILLocalVariableReference(this, newVariable.Offset);
+		}
+
 		private ushort ReadWord(MemoryStream stream)
 		{
 			int byte0 = stream.ReadByte();
@@ -1338,7 +1640,7 @@ namespace Disassembler
 			{
 				if (this.flowGraph != null)
 				{
-					writer.WriteLine($"{GetTabs(tabLevel + 1)}// {(this.flowGraph.BPFrame ? "Standard C frame" : "Assembly")}");
+					writer.WriteLine($"{GetTabs(tabLevel + 1)}// {(this.flowGraph.HasBPFrame ? "Standard C frame" : "Assembly")}");
 				}
 
 				if (verbosity > 0)
@@ -1368,7 +1670,14 @@ namespace Disassembler
 				writer.WriteLine();
 				writer.WriteLine($"{GetTabs(tabLevel + 1)}// function body");
 
-				if (this.asmInstructions.Count > 0 && this.fnEntryPoint != this.asmInstructions[0].LinearAddress)
+				int startPos = 0;
+
+				while (startPos < this.asmInstructions.Count && this.asmInstructions[startPos].InstructionType == CPUInstructionEnum.Remark)
+				{
+					startPos++;
+				}
+
+				if (this.asmInstructions.Count > 0 && this.fnEntryPoint != this.asmInstructions[startPos].LinearAddress)
 				{
 					writer.WriteLine($"{GetTabs(tabLevel + 1)}goto {GetInstructionByLinearAddress(this.fnEntryPoint)?.LabelName};");
 				}
@@ -1392,6 +1701,7 @@ namespace Disassembler
 					}
 
 					uint uiOffset = 0;
+					uint address = 0;
 					CPUParameter parameter;
 					ProgramFunction? function1;
 					int instructionIndex;
@@ -1731,12 +2041,26 @@ namespace Disassembler
 							parameter = instruction.Parameters[0];
 							//writer.WriteLine("{GetTabs(tabLevel)}// XCHG");
 							writer.Write($"{GetTabs(tabLevel + 1)}");
-							writer.WriteLine("this.oCPU.Temp.{0} = {1};", instruction.OperandSize.ToString(), parameter.ToSourceCSTextMZ(instruction.OperandSize));
+							if (instruction.OperandSize == CPUParameterSizeEnum.UInt8)
+							{
+								writer.WriteLine("this.oCPU.Temp.Low{0} = {1};", instruction.OperandSize.ToString(), parameter.ToSourceCSTextMZ(instruction.OperandSize));
+							}
+							else
+							{
+								writer.WriteLine("this.oCPU.Temp.{0} = {1};", instruction.OperandSize.ToString(), parameter.ToSourceCSTextMZ(instruction.OperandSize));
+							}
 							writer.Write($"{GetTabs(tabLevel + 1)}");
 							writer.WriteLine(parameter.ToDestinationCSTextMZ(instruction.OperandSize, instruction.Parameters[1].ToSourceCSTextMZ(instruction.OperandSize)));
 							parameter = instruction.Parameters[1];
 							writer.Write($"{GetTabs(tabLevel + 1)}");
-							writer.WriteLine(parameter.ToDestinationCSTextMZ(instruction.OperandSize, string.Format("this.oCPU.Temp.{0}", instruction.OperandSize.ToString())));
+							if (instruction.OperandSize == CPUParameterSizeEnum.UInt8)
+							{
+								writer.WriteLine(parameter.ToDestinationCSTextMZ(instruction.OperandSize, string.Format("this.oCPU.Temp.Low{0}", instruction.OperandSize.ToString())));
+							}
+							else
+							{
+								writer.WriteLine(parameter.ToDestinationCSTextMZ(instruction.OperandSize, string.Format("this.oCPU.Temp.{0}", instruction.OperandSize.ToString())));
+							}
 							break;
 
 						case CPUInstructionEnum.XLAT:
@@ -1799,7 +2123,7 @@ namespace Disassembler
 								}
 								else
 								{
-									writer.WriteLine($"{GetTabs(tabLevel + 2)}case {0}:", parameter.Value);
+									writer.WriteLine($"{GetTabs(tabLevel + 2)}case {parameter.Value}:");
 									writer.WriteLine($"{GetTabs(tabLevel + 3)}goto {this.asmInstructions[instructionIndex].LabelName};");
 								}
 							}
@@ -1819,6 +2143,14 @@ namespace Disassembler
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}if (this.oCPU.Flags.{((CPUJumpConditionEnum)instruction.Parameters[0].Value).ToString()}) goto " +
 									$"{this.asmInstructions[instructionIndex].LabelName};");
 							}
+							break;
+
+						case CPUInstructionEnum.IIf:
+							parameter = instruction.Parameters[0];
+							writer.WriteLine($"{GetTabs(tabLevel + 1)}// IIf");
+							writer.WriteLine($"{GetTabs(tabLevel + 1)}{instruction.Parameters[0].ToSourceCSTextMZ(instruction.OperandSize)} = "+
+								$"((this.oCPU.Flags.{((CPUJumpConditionEnum)instruction.Parameters[1].Value).ToString()}) ? " +
+								$"{instruction.Parameters[2].ToSourceCSTextMZ(instruction.OperandSize)} : {instruction.Parameters[3].ToSourceCSTextMZ(instruction.OperandSize)});");
 							break;
 
 						case CPUInstructionEnum.JCXZ:
@@ -1881,15 +2213,24 @@ namespace Disassembler
 							parameter = instruction.Parameters[0];
 							if (parameter.Type == CPUParameterTypeEnum.SegmentOffset)
 							{
-								uiOffset = MainProgram.ToLinearAddress(parameter.Segment, parameter.Value);
+								address = MainProgram.ToLinearAddress(parameter.Segment, parameter.Value);
 
-								if (uiOffset == 0)
+								if (address == 0)
 								{
-									writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.JmpUInt32(this.oCPU.ReadUInt32(this.oCPU.CS.UInt16, 0x{(instruction.Offset + 1):x}));");
+									ProgramSegment segment = this.parentSegment;
+									if (segment.GlobalVariables.ContainsKey(instruction.Offset + 1))
+									{
+										ILVariable variable = segment.GlobalVariables.GetValueByKey(instruction.Offset + 1);
+										writer.WriteLine($"{GetTabs(tabLevel + 1)}this.{variable.Name}();");
+									}
+									else
+									{
+										writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.JmpUInt32(this.oCPU.ReadUInt32(this.oCPU.CS.UInt16, 0x{(instruction.Offset + 1):x}));");
+									}
 								}
 								else
 								{
-									instructionIndex = this.GetInstructionPositionByLinearAddress(uiOffset);
+									instructionIndex = this.GetInstructionPositionByLinearAddress(address);
 
 									if (instructionIndex < 0)
 									{
@@ -1916,7 +2257,7 @@ namespace Disassembler
 							}
 							else
 							{
-								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PushUInt16(0); // stack management - push return offset");
+								//writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PushUInt16(0); // stack management - push return offset");
 							}
 
 							if (parameter.Type != CPUParameterTypeEnum.Immediate)
@@ -1973,9 +2314,13 @@ namespace Disassembler
 									throw new Exception($"Can't find function 'F0_{parameter.Segment:x4}_{parameter.Value:x4}'");
 								}
 							}
+
 							// all calls in medium memory model are far
-							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PopUInt16(); // stack management - pop return offset");
-							//writer.WriteLine("{GetTabs(tabLevel)+1}this.oCPU.CS.UInt16 = 0x{0:x4}; // restore this function segment", function.Segment);
+							if (verbosity > 0)
+							{
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PopUInt16(); // stack management - pop return offset");
+								//writer.WriteLine("{GetTabs(tabLevel)+1}this.oCPU.CS.UInt16 = 0x{0:x4}; // restore this function segment", function.Segment);
+							}
 							break;
 
 						case CPUInstructionEnum.CALLF:
@@ -1988,7 +2333,7 @@ namespace Disassembler
 							}
 							else
 							{
-								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PushUInt32(0); // stack management - push return segment, offset");
+								//writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PushUInt32(0); // stack management - push return segment, offset");
 							}
 
 							if (parameter.Type == CPUParameterTypeEnum.SegmentOffset)
@@ -2044,9 +2389,10 @@ namespace Disassembler
 							{
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.CallUInt32(this.oCPU.ReadUInt32({parameter.GetSegmentTextMZ()}, {parameter.ToCSTextMZ(instruction.OperandSize)}));");
 							}
-							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PopUInt32(); // stack management - pop return offset and segment");
+							
 							if (verbosity > 0)
 							{
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PopUInt32(); // stack management - pop return offset and segment");
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.CS.UInt16 = 0x{this.parentSegment.CPUSegment:x4}; // restore this function segment");
 							}
 							break;
@@ -2060,7 +2406,7 @@ namespace Disassembler
 							}
 							else
 							{
-								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PushUInt32(0); // stack management - push return segment, offset");
+								//writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PushUInt32(0); // stack management - push return segment, offset");
 							}
 
 							function1 = this.parentSegment.ParentProgram.FindFunction((ushort)instruction.Parameters[0].Value, 0, (ushort)instruction.Parameters[1].Value);
@@ -2092,9 +2438,9 @@ namespace Disassembler
 								throw new Exception($"Can't find function 'F{instruction.Parameters[0].Value}_0000_{instruction.Parameters[1].Value:x4}'");
 							}
 
-							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PopUInt32(); // stack management - pop return offset and segment");
 							if (verbosity > 0)
 							{
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PopUInt32(); // stack management - pop return offset and segment");
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.CS.UInt16 = 0x{this.parentSegment.CPUSegment:x4}; // restore this function segment");
 							}
 							break;
@@ -2150,8 +2496,12 @@ namespace Disassembler
 								{
 									writer.WriteLine($"{GetTabs(tabLevel + 1)}// {intComment}");
 								}
-								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.INT(0x{intNum:x2});");
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.INTUInt8(0x{intNum:x2});");
 							}
+							break;
+
+						case CPUInstructionEnum.Remark:
+							writer.WriteLine($"{GetTabs(tabLevel + 1)}// {instruction.Description}");
 							break;
 
 						default:

@@ -41,7 +41,7 @@ namespace Disassembler
 				case ILOperatorEnum.Add:
 					return "+";
 
-				case ILOperatorEnum.Substract:
+				case ILOperatorEnum.Subtract:
 					return "-";
 
 				case ILOperatorEnum.Multiply:
@@ -78,7 +78,29 @@ namespace Disassembler
 
 		public override string ToCSString()
 		{
-			return $"{this.leftOperand.ToCSString()} {OperatorToString(this.op)} {this.rightOperand.ToCSString()}";
+			StringBuilder sb = new StringBuilder();
+
+			if (leftOperand is ILOperator)
+			{
+				sb.Append($"({this.leftOperand.ToCSString()})");
+			}
+			else
+			{
+				sb.Append($"{this.leftOperand.ToCSString()}");
+			}
+
+			sb.Append($"{OperatorToString(this.op)}");
+
+			if (rightOperand is ILOperator)
+			{
+				sb.Append($"({this.rightOperand.ToCSString()})");
+			}
+			else
+			{
+				sb.Append($"{this.rightOperand.ToCSString()}");
+			}
+
+			return sb.ToString();
 		}
 
 		public override string ToString()

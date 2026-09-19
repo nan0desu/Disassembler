@@ -49,13 +49,13 @@ namespace Disassembler
 				switch (this.scope)
 				{
 					case ILVariableScopeEnum.Global:
-						return $"public {this.valueType.CSDeclaration} {this.Name}{this.CSInitialization}";
+						return $"public {this.valueType.CSDeclaration}{((this.arraySize > 0) ? $"[]" : "")} {this.Name}{this.CSInitialization}";
 
 					case ILVariableScopeEnum.LocalParameter:
-						return $"{this.valueType.CSDeclaration} {this.Name}";
+						return $"{this.valueType.CSDeclaration}{((this.arraySize > 0) ? $"[]" : "")} {this.Name}";
 
 					case ILVariableScopeEnum.LocalVariable:
-						return $"{this.valueType.CSDeclaration} {this.Name}{this.CSInitialization}";
+						return $"{this.valueType.CSDeclaration}{((this.arraySize > 0) ? $"[]" : "")} {this.Name}{this.CSInitialization}";
 
 					default:
 						return $"object {this.Name}";

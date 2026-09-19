@@ -14,8 +14,10 @@ namespace Disassembler
 		Pascal = 2,
 		Near = 0x10,
 		Far = 0x20,
-		CAPI = 0x40,
-		VariableArguments = 0x80,
-		CompilerInternal = 0x100
+		Interrupt = 0x40,
+		CAPI = 0x80,
+		Return = 0x100,
+		VariableArguments = 0x200,
+		CompilerInternal = 0x400
 	}
 }

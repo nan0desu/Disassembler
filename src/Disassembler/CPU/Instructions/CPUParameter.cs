@@ -252,10 +252,10 @@ namespace Disassembler.CPU
 							break;
 
 						case 8:
-							sb.AppendFormat("[{0} + BX + SI]", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
+							sb.AppendFormat("[{0} + SI + BX]", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
 							break;
 						case 9:
-							sb.AppendFormat("[{0} + BX + DI]", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
+							sb.AppendFormat("[{0} + DI + BX]", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
 							break;
 						case 10:
 							sb.AppendFormat("[BP {0} + SI]", RelativeToString(CPUParameterSizeEnum.UInt16, this.displacement));
@@ -277,10 +277,10 @@ namespace Disassembler.CPU
 							break;
 
 						case 16:
-							sb.AppendFormat("[{0} + BX + SI]", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
+							sb.AppendFormat("[{0} + SI + BX]", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
 							break;
 						case 17:
-							sb.AppendFormat("[{0} + BX + DI]", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
+							sb.AppendFormat("[{0} + DI + BX]", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
 							break;
 						case 18:
 							sb.AppendFormat("[BP {0} + SI]", RelativeToString(CPUParameterSizeEnum.UInt16, this.displacement));
@@ -310,10 +310,10 @@ namespace Disassembler.CPU
 					switch (this.value)
 					{
 						case 0:
-							sb.Append("(BX + SI)");
+							sb.Append("(SI + BX)");
 							break;
 						case 1:
-							sb.Append("(BX + DI)");
+							sb.Append("(DI + BX)");
 							break;
 						case 2:
 							sb.Append("(BP + SI)");
@@ -335,10 +335,10 @@ namespace Disassembler.CPU
 							break;
 
 						case 8:
-							sb.AppendFormat("({0} + BX + SI)", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
+							sb.AppendFormat("({0} + SI + BX)", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
 							break;
 						case 9:
-							sb.AppendFormat("({0} + BX + DI)", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
+							sb.AppendFormat("({0} + DI + BX)", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
 							break;
 						case 10:
 							sb.AppendFormat("(BP {0} + SI)", RelativeToString(CPUParameterSizeEnum.UInt16, this.displacement));
@@ -360,10 +360,10 @@ namespace Disassembler.CPU
 							break;
 
 						case 16:
-							sb.AppendFormat("({0} + BX + SI)", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
+							sb.AppendFormat("({0} + SI + BX)", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
 							break;
 						case 17:
-							sb.AppendFormat("({0} + BX + DI)", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
+							sb.AppendFormat("({0} + DI + BX)", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
 							break;
 						case 18:
 							sb.AppendFormat("(BP {0} + SI)", RelativeToString(CPUParameterSizeEnum.UInt16, this.displacement));
@@ -618,11 +618,11 @@ namespace Disassembler.CPU
 					switch (this.value)
 					{
 						case 0:
-							sb.Append("(ushort)(this.oCPU.BX.UInt16 + this.oCPU.SI.UInt16)");
+							sb.Append("(ushort)(this.oCPU.SI.UInt16 + this.oCPU.BX.UInt16)");
 							break;
 
 						case 1:
-							sb.Append("(ushort)(this.oCPU.BX.UInt16 + this.oCPU.DI.UInt16)");
+							sb.Append("(ushort)(this.oCPU.DI.UInt16 + this.oCPU.BX.UInt16)");
 							break;
 
 						case 2:
@@ -651,11 +651,11 @@ namespace Disassembler.CPU
 
 
 						case 8:
-							sb.AppendFormat("(ushort)({0} + this.oCPU.BX.UInt16 + this.oCPU.SI.UInt16)", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
+							sb.AppendFormat("(ushort)({0} + this.oCPU.SI.UInt16 + this.oCPU.BX.UInt16)", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
 							break;
 
 						case 9:
-							sb.AppendFormat("(ushort)({0} + this.oCPU.BX.UInt16 + this.oCPU.DI.UInt16)", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
+							sb.AppendFormat("(ushort)({0} + this.oCPU.DI.UInt16 + this.oCPU.BX.UInt16)", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
 							break;
 
 						case 10:
@@ -684,11 +684,11 @@ namespace Disassembler.CPU
 
 
 						case 16:
-							sb.AppendFormat("(ushort)({0} + this.oCPU.BX.UInt16 + this.oCPU.SI.UInt16)", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
+							sb.AppendFormat("(ushort)({0} + this.oCPU.SI.UInt16 + this.oCPU.BX.UInt16)", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
 							break;
 
 						case 17:
-							sb.AppendFormat("(ushort)({0} + this.oCPU.BX.UInt16 + this.oCPU.DI.UInt16)", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
+							sb.AppendFormat("(ushort)({0} + this.oCPU.DI.UInt16 + this.oCPU.BX.UInt16)", ImmediateDisplacementToString(CPUParameterSizeEnum.UInt16, this.displacement));
 							break;
 
 						case 18:

@@ -9,7 +9,7 @@ namespace Disassembler
     public enum ILOperatorEnum
     {
 		Add,
-		Substract,
+		Subtract,
 		Multiply,
 		Divide,
 		Modulo,

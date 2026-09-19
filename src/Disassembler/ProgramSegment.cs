@@ -67,17 +67,25 @@ namespace Disassembler
 				// sort by offsets
 				Array.Sort(functions, (item1, item2) => item1.FunctionOffset.CompareTo(item2.FunctionOffset));
 
-				writer.WriteLine("using Disassembler;");
+				writer.WriteLine("using IRB.VirtualCPU;");
 				writer.WriteLine();
-				writer.WriteLine("namespace Civilization1");
+				writer.WriteLine("namespace OpenCiv1");
 				writer.WriteLine("{");
 				writer.WriteLine("\tpublic class {0}", className);
 				writer.WriteLine("\t{");
-				writer.WriteLine($"\t\t// Segment 0x{this.CPUSegment:x}");
-				writer.WriteLine("\t\tprivate Civilization oParent;");
-				writer.WriteLine("\t\tprivate CPU oCPU;");
+				if (this.CPUOverlay == 0)
+				{
+					writer.WriteLine($"\t\t// Segment 0x{this.CPUSegment:x}");
+				}
+				else
+				{
+					writer.WriteLine($"\t\t// Overlay 0x{this.CPUOverlay:x}");
+				}
+
+				writer.WriteLine("\t\tprivate OpenCiv1Game oParent;");
+				writer.WriteLine("\t\tprivate VCPU oCPU;");
 				writer.WriteLine();
-				writer.WriteLine("\t\tpublic {0}(Civilization parent)", className);
+				writer.WriteLine("\t\tpublic {0}(OpenCiv1Game parent)", className);
 				writer.WriteLine("\t\t{");
 				writer.WriteLine("\t\t\tthis.oParent = parent;");
 				writer.WriteLine("\t\t\tthis.oCPU = parent.CPU;");
