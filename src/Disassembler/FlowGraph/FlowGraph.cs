@@ -1264,6 +1264,10 @@ namespace Disassembler
 			localSegments.Add(CPUSegmentRegisterEnum.DS, this.parentFunction.ParentSegment.ParentProgram.DefaultDS);
 			localSegments.Add(CPUSegmentRegisterEnum.ES, this.parentFunction.ParentSegment.ParentProgram.DefaultDS);
 
+			// a register that is read before it is written holds whatever the caller left in it,
+			// seed those so that register preservation and incoming arguments translate
+			SeedIncomingRegisters(localRegisters);
+
 			for (int i = 0; i < this.nodes.Count; i++)
 			{
 				this.nodes[i].Value.ClearIL();
@@ -1272,8 +1276,40 @@ namespace Disassembler
 			this.parentFunction.TranslatedToIL = TranslateNodeToIL(this.startNode!, localRegisters, localSegments, localStack);
 		}
 
-		private bool TranslateNodeToIL(FlowGraphNode node, 
-			BDictionary<CPURegisterEnum, ILExpression> localRegisters, 
+		/// <summary>
+		/// Seeds the general purpose registers with their incoming value, so that reading a register
+		/// the function never wrote resolves to the caller's value instead of failing the translation.
+		/// </summary>
+		private void SeedIncomingRegisters(BDictionary<CPURegisterEnum, ILExpression> localRegisters)
+		{
+			MainProgram parentProgram = this.parentFunction.ParentSegment.ParentProgram;
+
+			CPURegisterEnum[] wordRegisters = [CPURegisterEnum.AX, CPURegisterEnum.BX, CPURegisterEnum.CX, CPURegisterEnum.DX,
+				CPURegisterEnum.SI, CPURegisterEnum.DI, CPURegisterEnum.BP];
+			CPURegisterEnum[] byteRegisters = [CPURegisterEnum.AL, CPURegisterEnum.AH, CPURegisterEnum.BL, CPURegisterEnum.BH,
+				CPURegisterEnum.CL, CPURegisterEnum.CH, CPURegisterEnum.DL, CPURegisterEnum.DH];
+
+			for (int i = 0; i < wordRegisters.Length; i++)
+			{
+				if (!localRegisters.ContainsKey(wordRegisters[i]))
+				{
+					localRegisters.Add(wordRegisters[i], new ILRegisterReference(wordRegisters[i],
+						parentProgram.FromCPUParameterSizeEnum(CPUParameterSizeEnum.UInt16)));
+				}
+			}
+
+			for (int i = 0; i < byteRegisters.Length; i++)
+			{
+				if (!localRegisters.ContainsKey(byteRegisters[i]))
+				{
+					localRegisters.Add(byteRegisters[i], new ILRegisterReference(byteRegisters[i],
+						parentProgram.FromCPUParameterSizeEnum(CPUParameterSizeEnum.UInt8)));
+				}
+			}
+		}
+
+		private bool TranslateNodeToIL(FlowGraphNode node,
+			BDictionary<CPURegisterEnum, ILExpression> localRegisters,
 			BDictionary<CPUSegmentRegisterEnum, uint> localSegments,
 			Stack<ILExpression> localStack)
 		{
@@ -1300,6 +1336,10 @@ namespace Disassembler
 				}
 				else
 				{
+					// mark the node before translating it, a loop back edge leads back to this node
+					// and without the mark the recursion below never terminates
+					node.TranslatedToIL = true;
+
 					ProgramFunction parentFunction = this.parentFunction;
 					MainProgram parentProgram = this.parentFunction.ParentSegment.ParentProgram;
 
@@ -1382,7 +1422,7 @@ namespace Disassembler
 								{
 									register = parameter0.RegisterValue;
 
-									if (localRegisters.ContainsKey(register) && cachedRegisters.ContainsKey(register))
+									if (localRegisters.ContainsKey(register))
 									{
 										ILExpression oldValue = localRegisters.GetValueByKey(register);
 										ILExpression newValue = new ILOperator(oldValue, ILOperatorEnum.Add, ParameterToIL(localSegments, localRegisters, parameter1));
@@ -1408,7 +1448,7 @@ namespace Disassembler
 								{
 									register = parameter0.RegisterValue;
 
-									if (localRegisters.ContainsKey(register) && cachedRegisters.ContainsKey(register))
+									if (localRegisters.ContainsKey(register))
 									{
 										ILExpression oldValue = localRegisters.GetValueByKey(register);
 										ILExpression newValue = new ILOperator(oldValue, ILOperatorEnum.BitwiseAnd, ParameterToIL(localSegments, localRegisters, parameter1));
@@ -1434,7 +1474,7 @@ namespace Disassembler
 								{
 									register = parameter0.RegisterValue;
 
-									if (localRegisters.ContainsKey(register) && cachedRegisters.ContainsKey(register))
+									if (localRegisters.ContainsKey(register))
 									{
 										ILExpression oldValue = localRegisters.GetValueByKey(register);
 										ILExpression newValue = new ILOperator(oldValue, ILOperatorEnum.BitwiseOr, ParameterToIL(localSegments, localRegisters, parameter1));
@@ -1481,7 +1521,7 @@ namespace Disassembler
 									{
 										register = parameter0.RegisterValue;
 
-										if (localRegisters.ContainsKey(register) && cachedRegisters.ContainsKey(register))
+										if (localRegisters.ContainsKey(register))
 										{
 											ILExpression oldValue = localRegisters.GetValueByKey(register);
 											ILExpression newValue = new ILOperator(oldValue, ILOperatorEnum.BitwiseXor, ParameterToIL(localSegments, localRegisters, parameter1));
@@ -1508,7 +1548,7 @@ namespace Disassembler
 								{
 									register = parameter0.RegisterValue;
 
-									if (localRegisters.ContainsKey(register) && cachedRegisters.ContainsKey(register))
+									if (localRegisters.ContainsKey(register))
 									{
 										ILExpression oldValue = localRegisters.GetValueByKey(register);
 										ILExpression newValue = new ILOperator(oldValue, ILOperatorEnum.ShiftLeft, ParameterToIL(localSegments, localRegisters, parameter1));
@@ -1534,7 +1574,7 @@ namespace Disassembler
 								{
 									register = parameter0.RegisterValue;
 
-									if (localRegisters.ContainsKey(register) && cachedRegisters.ContainsKey(register))
+									if (localRegisters.ContainsKey(register))
 									{
 										ILExpression oldValue = localRegisters.GetValueByKey(register);
 										ILExpression newValue = new ILOperator(oldValue, ILOperatorEnum.ShiftRight, ParameterToIL(localSegments, localRegisters, parameter1));
@@ -1560,7 +1600,7 @@ namespace Disassembler
 								{
 									register = parameter0.RegisterValue;
 
-									if (localRegisters.ContainsKey(register) && cachedRegisters.ContainsKey(register))
+									if (localRegisters.ContainsKey(register))
 									{
 										ILExpression oldValue = localRegisters.GetValueByKey(register);
 										ILExpression newValue = new ILOperator(oldValue, ILOperatorEnum.ArithmeticShiftRight, ParameterToIL(localSegments, localRegisters, parameter1));
@@ -1586,7 +1626,7 @@ namespace Disassembler
 								{
 									register = parameter0.RegisterValue;
 
-									if (localRegisters.ContainsKey(register) && cachedRegisters.ContainsKey(register))
+									if (localRegisters.ContainsKey(register))
 									{
 										ILExpression oldValue = localRegisters.GetValueByKey(register);
 										ILExpression newValue = new ILOperator(oldValue, ILOperatorEnum.Subtract, ParameterToIL(localSegments, localRegisters, parameter1));
@@ -1665,7 +1705,7 @@ namespace Disassembler
 								{
 									register = parameter0.RegisterValue;
 
-									if (localRegisters.ContainsKey(register) && cachedRegisters.ContainsKey(register))
+									if (localRegisters.ContainsKey(register))
 									{
 										node.ILInstructions.Add(new ILUnaryAssignmentOperator(localRegisters.GetValueByKey(register), ILUnaryOperatorEnum.Negate));
 									}
@@ -1686,7 +1726,7 @@ namespace Disassembler
 								{
 									register = parameter0.RegisterValue;
 
-									if (localRegisters.ContainsKey(register) && cachedRegisters.ContainsKey(register))
+									if (localRegisters.ContainsKey(register))
 									{
 										node.ILInstructions.Add(new ILUnaryAssignmentOperator(localRegisters.GetValueByKey(register), ILUnaryOperatorEnum.BitwiseNot));
 									}
@@ -1720,6 +1760,16 @@ namespace Disassembler
 										localRegisters.Add(register, ParameterToIL(localSegments, localRegisters, instruction.Parameters[1]));
 										cachedRegisters.Add(register, new(node.ILInstructions.Count, register));
 
+										break;
+
+									case CPUParameterTypeEnum.MemoryAddress:
+									case CPUParameterTypeEnum.LocalVariable:
+									case CPUParameterTypeEnum.LocalParameter:
+										// a store is a side effect, unlike a register destination it can't be
+										// deferred into localRegisters, it has to be emitted at this point
+										node.ILInstructions.Add(new ILAssignment(
+											ParameterToIL(localSegments, localRegisters, parameter0, instruction.OperandSize),
+											ParameterToIL(localSegments, localRegisters, instruction.Parameters[1], instruction.OperandSize)));
 										break;
 
 									default:
@@ -2478,7 +2528,8 @@ namespace Disassembler
 			BDictionary<CPURegisterEnum, ILExpression> localRegisters, ILValueType memType,
 			ILExpression? baseExpr, ILExpression? indexExpr, int displacement, bool hasDisplacement)
 		{
-			if (segment != null)
+			// 'is not null' rather than '!= null', ProgramSegment overloads the equality operators
+			if (segment is not null)
 			{
 				return new ILMemoryReference(segment, memType, baseExpr, indexExpr, displacement, hasDisplacement);
 			}
@@ -2498,8 +2549,13 @@ namespace Disassembler
 			return addr;
 		}
 
+		/// <param name="operandSize">
+		/// The width of the access, when known. A memory parameter doesn't always carry its own size,
+		/// the authoritative width is the operand size of the instruction that uses it.
+		/// </param>
 		private ILExpression ParameterToIL(BDictionary<CPUSegmentRegisterEnum, uint> localSegments,
-			BDictionary<CPURegisterEnum, ILExpression> localRegisters, CPUParameter parameter)
+			BDictionary<CPURegisterEnum, ILExpression> localRegisters, CPUParameter parameter,
+			CPUParameterSizeEnum operandSize = CPUParameterSizeEnum.Undefined)
 		{
 			ProgramFunction parentFunction = this.parentFunction;
 
@@ -2540,7 +2596,8 @@ namespace Disassembler
 
 				case CPUParameterTypeEnum.MemoryAddress:
 				{
-					ILValueType memType = parentFunction.ParentSegment.ParentProgram.FromCPUParameterSizeEnum(parameter.Size);
+					ILValueType memType = parentFunction.ParentSegment.ParentProgram.FromCPUParameterSizeEnum(
+						operandSize != CPUParameterSizeEnum.Undefined ? operandSize : parameter.Size);
 
 					if (parameter.DataSegment == CPUSegmentRegisterEnum.SS)
 					{

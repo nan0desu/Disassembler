@@ -204,8 +204,14 @@ namespace Disassembler
 			return !IsEqual(item1, item2);
 		}
 
-		private static bool IsEqual(ProgramSegment item1, ProgramSegment item2)
+		private static bool IsEqual(ProgramSegment? item1, ProgramSegment? item2)
 		{
+			// comparing against null is legitimate, don't dereference it
+			if (item1 is null || item2 is null)
+			{
+				return item1 is null && item2 is null;
+			}
+
 			// we will not compare functions that segments contain, because we are comparing only the segment objects
 			return item1.segment == item2.segment && item1.ordinal == item2.ordinal && item1.programSegmentType == item2.programSegmentType;
 		}

@@ -205,6 +205,7 @@ namespace Disassembler
 		public void ClearIL()
 		{
 			this.ilInstructions.Clear();
+			this.translatedToIL = false;
 			this.parentGraph.ParentFunction.TranslatedToIL = false;
 		}
 

@@ -911,6 +911,13 @@ internal class Program
 
 					writer.WriteLine($"// {segment.Name}.{function.Name} - NOT TRANSLATED at " +
 						$"'{function.FlowGraph.LastTranslatedInstruction}': {ex.Message}");
+
+					// a translator that says "not implemented" is expected, anything else is a bug
+					if (ex.GetType() != typeof(Exception))
+					{
+						writer.WriteLine($"// {ex.StackTrace?.Replace("\n", "\n// ")}");
+					}
+
 					writer.WriteLine();
 					continue;
 				}

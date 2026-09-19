@@ -35,17 +35,41 @@ namespace Disassembler
 
 		public override string ToCSString()
 		{
-			// Build the address expression
-			string sizeMethod = this.valueType.SizeOf switch
-			{
-				1 => "ReadUInt8",
-				2 => "ReadUInt16",
-				4 => "ReadUInt32",
-				_ => "ReadUInt16"
-			};
-
 			string addr = BuildAddressExpression();
-			return $"this.oCPU.{sizeMethod}(this.oParent.{this.segment.Name}.Segment, (ushort)({addr}))";
+			return $"this.oCPU.Read{AccessorSuffix()}(this.oParent.{this.segment.Name}.Segment, (ushort)({addr}))";
+		}
+
+		/// <summary>
+		/// A memory reference used as an assignment target is a Write call, not a Read call,
+		/// the value being stored becomes the last argument.
+		/// </summary>
+		public string ToCSWriteString(string value)
+		{
+			string addr = BuildAddressExpression();
+			return $"this.oCPU.Write{AccessorSuffix()}(this.oParent.{this.segment.Name}.Segment, (ushort)({addr}), {value})";
+		}
+
+		/// <summary>
+		/// The accessor width, taken from the base type rather than from SizeOf,
+		/// because SizeOf reports the stack slot size and rounds a byte up to 2.
+		/// </summary>
+		private string AccessorSuffix()
+		{
+			switch (this.valueType.BaseType)
+			{
+				case ILBaseValueTypeEnum.UInt8:
+				case ILBaseValueTypeEnum.Int8:
+					return "UInt8";
+
+				case ILBaseValueTypeEnum.UInt32:
+				case ILBaseValueTypeEnum.Int32:
+				case ILBaseValueTypeEnum.Ptr32:
+				case ILBaseValueTypeEnum.FnPtr32:
+					return "UInt32";
+
+				default:
+					return "UInt16";
+			}
 		}
 
 		private string BuildAddressExpression()

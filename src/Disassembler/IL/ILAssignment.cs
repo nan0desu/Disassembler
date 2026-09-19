@@ -29,6 +29,12 @@ namespace Disassembler
 
 		public override string ToCSString()
 		{
+			// an indirect memory target is written through a Write call, it's not an lvalue
+			if (this.leftOperand is ILMemoryReference memoryReference)
+			{
+				return memoryReference.ToCSWriteString(this.rightOperand.ToCSString());
+			}
+
 			return $"{this.leftOperand.ToCSString()} = {this.rightOperand.ToCSString()}";
 		}
 
