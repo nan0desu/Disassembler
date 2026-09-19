@@ -811,11 +811,11 @@ internal class Program
 		ProcessOverlay("VGA", "MGRAPHIC.EXE", "VGA", version, codePath);
 
 		// Sound Drivers
-		ProcessOverlay("NSound", "NSOUND.CVL", "NSnd", version, codePath);
-		ProcessOverlay("ASound", "ASOUND.CVL", "ASnd", version, codePath);
-		ProcessOverlay("ISound", "ISOUND.CVL", "ISnd", version, codePath);
-		ProcessOverlay("RSound", "RSOUND.CVL", "RSnd", version, codePath);
-		ProcessOverlay("TSound", "TSOUND.CVL", "TSnd", version, codePath);
+		TranslateOverlayToIL(ProcessOverlay("NSound", "NSOUND.CVL", "NSnd", version, codePath), "NSound", codePath);
+		TranslateOverlayToIL(ProcessOverlay("ASound", "ASOUND.CVL", "ASnd", version, codePath), "ASound", codePath);
+		TranslateOverlayToIL(ProcessOverlay("ISound", "ISOUND.CVL", "ISnd", version, codePath), "ISound", codePath);
+		TranslateOverlayToIL(ProcessOverlay("RSound", "RSOUND.CVL", "RSnd", version, codePath), "RSound", codePath);
+		TranslateOverlayToIL(ProcessOverlay("TSound", "TSOUND.CVL", "TSnd", version, codePath), "TSound", codePath);
 
 		getWriter.Close();
 		initWriter.Close();
@@ -830,7 +830,7 @@ internal class Program
 	/// <param name="name">Driver name, used for the console messages</param>
 	/// <param name="fileName">Overlay file name inside GameSRC\Civ1</param>
 	/// <param name="suffix">Suffix appended to the emitted segment names</param>
-	private static void ProcessOverlay(string name, string fileName, string suffix, int version, string codePath)
+	private static Disassembler.MainProgram? ProcessOverlay(string name, string fileName, string suffix, int version, string codePath)
 	{
 		Console.WriteLine("* Processing overlay {0}", name);
 
@@ -856,10 +856,133 @@ internal class Program
 			}
 
 			Console.WriteLine("{0} segments: {1}", name, segmentOffsets.Length);
+
+			return disassembler;
 		}
 		catch (Exception ex)
 		{
 			Console.WriteLine($"Warning: {name} overlay disassembly failed: {ex.Message}");
+
+			return null;
 		}
+	}
+
+	/// <summary>
+	/// Translates every function of an already disassembled overlay to IL and dumps the result.
+	/// Functions that the IL translator can't handle yet are reported instead of aborting the run.
+	/// </summary>
+	/// <param name="program">Disassembled overlay, or null when the disassembly failed</param>
+	/// <param name="name">Driver name, used for the console messages and the output file</param>
+	private static void TranslateOverlayToIL(Disassembler.MainProgram? program, string name, string codePath)
+	{
+		if (program == null)
+			return;
+
+		Console.WriteLine("* Translating overlay {0} to IL", name);
+
+		int translated = 0;
+		int failed = 0;
+		Dictionary<string, int> reasons = [];
+
+		using StreamWriter writer = new($"{codePath}{Path.DirectorySeparatorChar}{name}IL.txt");
+
+		uint[] segmentOffsets = program.Segments.Keys.ToArray();
+		Array.Sort(segmentOffsets);
+
+		for (int i = 0; i < segmentOffsets.Length; i++)
+		{
+			ProgramSegment segment = program.Segments.GetValueByKey(segmentOffsets[i]);
+
+			for (int j = 0; j < segment.Functions.Count; j++)
+			{
+				ProgramFunction function = segment.Functions[j].Value;
+
+				if (function.FlowGraph == null)
+					continue;
+
+				try
+				{
+					function.FlowGraph.TranslateToIL();
+				}
+				catch (Exception ex)
+				{
+					failed++;
+					CountFailure(reasons, ex, function.FlowGraph.LastTranslatedInstruction);
+
+					writer.WriteLine($"// {segment.Name}.{function.Name} - NOT TRANSLATED at " +
+						$"'{function.FlowGraph.LastTranslatedInstruction}': {ex.Message}");
+					writer.WriteLine();
+					continue;
+				}
+
+				// the dump can fail on its own, an IL expression that can't be written out
+				// is not a translation that we can count as successful
+				try
+				{
+					WriteFunctionIL(writer, segment, function);
+					translated++;
+				}
+				catch (Exception ex)
+				{
+					failed++;
+					CountFailure(reasons, ex);
+
+					writer.WriteLine($"// {segment.Name}.{function.Name} - NOT WRITTEN: {ex.Message}");
+					writer.WriteLine();
+				}
+			}
+		}
+
+		Console.WriteLine("{0} IL: {1} of {2} functions translated", name, translated, translated + failed);
+
+		foreach (KeyValuePair<string, int> reason in reasons.OrderByDescending(item => item.Value))
+		{
+			Console.WriteLine("  {0}x {1}", reason.Value, reason.Key);
+		}
+	}
+
+	/// <summary>
+	/// Groups a translation failure by kind, the quoted parts are the specific register or parameter.
+	/// The lookbehind keeps apostrophes inside words ("Don't") from opening a quote.
+	/// </summary>
+	private static void CountFailure(Dictionary<string, int> reasons, Exception ex, CPUInstruction? instruction = null)
+	{
+		string reason = Regex.Replace(ex.Message, "(?<![A-Za-z])'[^']*'", "'?'");
+
+		if (instruction != null)
+		{
+			reason = $"{instruction.InstructionType} - {reason}";
+		}
+
+		reasons.TryGetValue(reason, out int count);
+		reasons[reason] = count + 1;
+	}
+
+	/// <summary>
+	/// Dumps the IL instructions of a translated function, one flow graph node at a time.
+	/// </summary>
+	private static void WriteFunctionIL(StreamWriter writer, ProgramSegment segment, ProgramFunction function)
+	{
+		writer.WriteLine($"// {segment.Name}.{function.Name}");
+
+		uint[] nodeAddresses = function.FlowGraph!.Nodes.Keys.ToArray();
+		Array.Sort(nodeAddresses);
+
+		for (int i = 0; i < nodeAddresses.Length; i++)
+		{
+			FlowGraphNode node = function.FlowGraph.Nodes.GetValueByKey(nodeAddresses[i]);
+
+			if (node.ILInstructions.Count == 0)
+				continue;
+
+			writer.WriteLine($"n{node.LinearAddress:x}:");
+
+			for (int j = 0; j < node.ILInstructions.Count; j++)
+			{
+				writer.WriteLine($"\t{node.ILInstructions[j].ToCSString()};");
+			}
+		}
+
+		writer.WriteLine();
 	}
 }

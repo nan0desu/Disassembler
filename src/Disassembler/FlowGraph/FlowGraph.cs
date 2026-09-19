@@ -12,6 +12,8 @@ namespace Disassembler
 		private FlowGraphNode startNode;
 		private FlowGraphNode endNode;
 		private BDictionary<uint, FlowGraphNode> nodes = [];
+		// the instruction TranslateToIL() is working on, so that a failure can name it
+		private CPUInstruction? lastTranslatedInstruction = null;
 		private bool hasBPFrame = false;
 		private bool usesSI = false;
 		private bool usesDI = false;
@@ -1320,6 +1322,8 @@ namespace Disassembler
 						CPURegisterEnum register;
 						ILExpression variable;
 						ProgramFunction? function;
+
+						this.lastTranslatedInstruction = instruction;
 
 						switch (instruction.InstructionType)
 						{
@@ -3785,6 +3789,11 @@ namespace Disassembler
 		public BDictionary<uint, FlowGraphNode> Nodes { get => this.nodes; }
 
 		public FlowGraphNode StartNode { get => this.startNode; }
+
+		/// <summary>
+		/// The instruction TranslateToIL() was last working on, names the blocking instruction after a failure.
+		/// </summary>
+		public CPUInstruction? LastTranslatedInstruction { get => this.lastTranslatedInstruction; }
 
 		public FlowGraphNode EndNode { get => this.endNode; }
 
