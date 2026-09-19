@@ -805,108 +805,61 @@ internal class Program
 		}
 
 		// Misc Driver
-		Console.WriteLine("* Processing overlay Misc");
-		MZExecutable oMiscEXE = new(string.Format("GameSRC{0}Civ1{0}MISC.EXE",
-			Path.DirectorySeparatorChar));
-
-		List<ModuleMatch> aMatchesMisc = [];
-		Disassembler.MainProgram oMiscDisassembler = new Disassembler.MainProgram(oMiscEXE, aMatchesMisc, version);
-
-		oMiscDisassembler.DisassembleOverlay();
-		oMiscDisassembler.AssignOrdinals();
-
-		uint[] segmentOffsetsMisc = oMiscDisassembler.Segments.Keys.ToArray();
-		Array.Sort(segmentOffsetsMisc);
-
-		for (int i = 0; i < segmentOffsetsMisc.Length; i++)
-		{
-			ProgramSegment segment = oMiscDisassembler.Segments.GetValueByKey(segmentOffsetsMisc[i]);
-			segment.Name += "Misc";
-			segment.WriteAsmCS(codePath, 1);
-		}
-
-		Console.WriteLine("Misc segments: {0}", segmentOffsetsMisc.Length);
+		ProcessOverlay("Misc", "MISC.EXE", "Misc", version, codePath);
 
 		// VGA Driver
-		Console.WriteLine("* Processing overlay VGA");
-		try
-		{
-			MZExecutable oVGAEXE = new(string.Format("GameSRC{0}Civ1{0}MGRAPHIC.EXE",
-				Path.DirectorySeparatorChar));
+		ProcessOverlay("VGA", "MGRAPHIC.EXE", "VGA", version, codePath);
 
-			List<ModuleMatch> aMatchesMGA = [];
-			Disassembler.MainProgram oVGADisassembler = new Disassembler.MainProgram(oVGAEXE, aMatchesMGA, version);
-
-			oVGADisassembler.DisassembleOverlay();
-			oVGADisassembler.AssignOrdinals();
-
-			uint[] segmentOffsetsVGA = oVGADisassembler.Segments.Keys.ToArray();
-			Array.Sort(segmentOffsetsVGA);
-
-			for (int i = 0; i < segmentOffsetsVGA.Length; i++)
-			{
-				ProgramSegment segment = oVGADisassembler.Segments.GetValueByKey(segmentOffsetsVGA[i]);
-				segment.Name += "VGA";
-				segment.WriteAsmCS(codePath, 1);
-			}
-
-			Console.WriteLine("VGA segments: {0}", segmentOffsetsVGA.Length);
-		}
-		catch (Exception ex)
-		{
-			Console.WriteLine($"Warning: VGA overlay disassembly failed: {ex.Message}");
-		}
-
-		// NSound Driver
-		Console.WriteLine("* Processing overlay NSound");
-		MZExecutable oNSEXE = new(string.Format("GameSRC{0}Civ1{0}NSOUND.CVL",
-			Path.DirectorySeparatorChar));
-
-		List<ModuleMatch> aMatchesNS = [];
-		Disassembler.MainProgram oNSoundDisassembler = new Disassembler.MainProgram(oNSEXE, aMatchesNS, version);
-
-		oNSoundDisassembler.DisassembleOverlay();
-		oNSoundDisassembler.AssignOrdinals();
-
-		uint[] segmentOffsetsONsnd = oNSoundDisassembler.Segments.Keys.ToArray();
-		Array.Sort(segmentOffsetsONsnd);
-
-		for (int i = 0; i < segmentOffsetsONsnd.Length; i++)
-		{
-			ProgramSegment segment = oNSoundDisassembler.Segments.GetValueByKey(segmentOffsetsONsnd[i]);
-			segment.Name += "NSnd";
-			segment.WriteAsmCS(codePath, 1);
-		}
-
-		Console.WriteLine("NSound segments: {0}", segmentOffsetsONsnd.Length);
-
-		// RSound Driver
-		Console.WriteLine("* Processing overlay RSound");
-		MZExecutable oGSoundEXE = new(string.Format("GameSRC{0}Civ1{0}rsound.cvl",
-			Path.DirectorySeparatorChar));
-
-		List<ModuleMatch> aMatchesGS = [];
-		Disassembler.MainProgram oGSoundDisassembler = new Disassembler.MainProgram(oGSoundEXE, aMatchesGS, version);
-
-		oGSoundDisassembler.DisassembleOverlay();
-		oGSoundDisassembler.AssignOrdinals();
-
-		uint[] segmentOffsetsOGsnd = oGSoundDisassembler.Segments.Keys.ToArray();
-		Array.Sort(segmentOffsetsOGsnd);
-
-		for (int i = 0; i < segmentOffsetsOGsnd.Length; i++)
-		{
-			ProgramSegment segment = oGSoundDisassembler.Segments.GetValueByKey(segmentOffsetsOGsnd[i]);
-			segment.Name += "RSnd";
-			segment.WriteAsmCS(codePath, 1);
-		}
-
-		Console.WriteLine("RSound segments: {0}", segmentOffsetsOGsnd.Length);
+		// Sound Drivers
+		ProcessOverlay("NSound", "NSOUND.CVL", "NSnd", version, codePath);
+		ProcessOverlay("ASound", "ASOUND.CVL", "ASnd", version, codePath);
+		ProcessOverlay("ISound", "ISOUND.CVL", "ISnd", version, codePath);
+		ProcessOverlay("RSound", "RSOUND.CVL", "RSnd", version, codePath);
+		ProcessOverlay("TSound", "TSOUND.CVL", "TSnd", version, codePath);
 
 		getWriter.Close();
 		initWriter.Close();
 		objectWriter.Close();
 
 		Console.WriteLine("Processing finished");
+	}
+
+	/// <summary>
+	/// Disassembles a single overlay driver and emits its segments as assembly level C#.
+	/// </summary>
+	/// <param name="name">Driver name, used for the console messages</param>
+	/// <param name="fileName">Overlay file name inside GameSRC\Civ1</param>
+	/// <param name="suffix">Suffix appended to the emitted segment names</param>
+	private static void ProcessOverlay(string name, string fileName, string suffix, int version, string codePath)
+	{
+		Console.WriteLine("* Processing overlay {0}", name);
+
+		try
+		{
+			MZExecutable overlayEXE = new(string.Format("GameSRC{0}Civ1{0}{1}",
+				Path.DirectorySeparatorChar, fileName));
+
+			List<ModuleMatch> matches = [];
+			Disassembler.MainProgram disassembler = new Disassembler.MainProgram(overlayEXE, matches, version);
+
+			disassembler.DisassembleOverlay();
+			disassembler.AssignOrdinals();
+
+			uint[] segmentOffsets = disassembler.Segments.Keys.ToArray();
+			Array.Sort(segmentOffsets);
+
+			for (int i = 0; i < segmentOffsets.Length; i++)
+			{
+				ProgramSegment segment = disassembler.Segments.GetValueByKey(segmentOffsets[i]);
+				segment.Name += suffix;
+				segment.WriteAsmCS(codePath, 1);
+			}
+
+			Console.WriteLine("{0} segments: {1}", name, segmentOffsets.Length);
+		}
+		catch (Exception ex)
+		{
+			Console.WriteLine($"Warning: {name} overlay disassembly failed: {ex.Message}");
+		}
 	}
 }
