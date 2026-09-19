@@ -771,8 +771,8 @@ internal class Program
 		
 		Console.WriteLine("* Emitting flow graphs");
 		// Emit flow graphs
-		/*uint ilSegment = 0x181;
-		ushort ilFunction = 0x136;
+		uint ilSegment = 0x181;
+		ushort ilFunction = 0x14a;
 
 		if (mainProgram.Segments.ContainsKey(ilSegment))
 		{
@@ -789,7 +789,7 @@ internal class Program
 					Console.WriteLine("Func {0} exists, writed test.gv", ilFunction);
 				}
             }
-		}*/
+		}
 
 		//Console.WriteLine();
 		Console.WriteLine("* Translating code to IL");
