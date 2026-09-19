@@ -16,7 +16,37 @@ internal class Program
 
 		path = string.IsNullOrEmpty(path) ? "" : path;
 
+		if (args.Length > 0 && args[0].Equals("colonization", StringComparison.OrdinalIgnoreCase))
+		{
+			ParseColonization(path);
+			return;
+		}
+
 		ParseDOSEXE(path, 3);
+	}
+
+	/// <summary>
+	/// Colonization is built with the same MicroSoft C overlay scheme as Civ1. Its sound drivers
+	/// are standalone MZ overlays with the same 512 byte header and 0000:0010 entry point as the
+	/// Civ1 .CVL drivers, so they go through the same overlay path.
+	/// </summary>
+	private static void ParseColonization(string path)
+	{
+		string outputPath = path + $"{Path.DirectorySeparatorChar}Output";
+		string codePath = outputPath + $"{Path.DirectorySeparatorChar}Colonization";
+
+		if (!Directory.Exists(outputPath))
+			Directory.CreateDirectory(outputPath);
+		if (!Directory.Exists(codePath))
+			Directory.CreateDirectory(codePath);
+
+		// Sound Drivers
+		TranslateOverlayToIL(ProcessOverlay("COLONIZE", "ASound", "ASOUND.COL", "ASnd", 0, codePath), "ASound", codePath);
+		TranslateOverlayToIL(ProcessOverlay("COLONIZE", "GSound", "GSOUND.COL", "GSnd", 0, codePath), "GSound", codePath);
+		TranslateOverlayToIL(ProcessOverlay("COLONIZE", "PSound", "PSOUND.COL", "PSnd", 0, codePath), "PSound", codePath);
+		TranslateOverlayToIL(ProcessOverlay("COLONIZE", "RSound", "RSOUND.COL", "RSnd", 0, codePath), "RSound", codePath);
+
+		Console.WriteLine("Processing finished");
 	}
 
 	private static void ParseDOSEXE(string path, int version)
@@ -805,17 +835,17 @@ internal class Program
 		}
 
 		// Misc Driver
-		ProcessOverlay("Misc", "MISC.EXE", "Misc", version, codePath);
+		ProcessOverlay("Civ1", "Misc", "MISC.EXE", "Misc", version, codePath);
 
 		// VGA Driver
-		ProcessOverlay("VGA", "MGRAPHIC.EXE", "VGA", version, codePath);
+		ProcessOverlay("Civ1", "VGA", "MGRAPHIC.EXE", "VGA", version, codePath);
 
 		// Sound Drivers
-		TranslateOverlayToIL(ProcessOverlay("NSound", "NSOUND.CVL", "NSnd", version, codePath), "NSound", codePath);
-		TranslateOverlayToIL(ProcessOverlay("ASound", "ASOUND.CVL", "ASnd", version, codePath), "ASound", codePath);
-		TranslateOverlayToIL(ProcessOverlay("ISound", "ISOUND.CVL", "ISnd", version, codePath), "ISound", codePath);
-		TranslateOverlayToIL(ProcessOverlay("RSound", "RSOUND.CVL", "RSnd", version, codePath), "RSound", codePath);
-		TranslateOverlayToIL(ProcessOverlay("TSound", "TSOUND.CVL", "TSnd", version, codePath), "TSound", codePath);
+		TranslateOverlayToIL(ProcessOverlay("Civ1", "NSound", "NSOUND.CVL", "NSnd", version, codePath), "NSound", codePath);
+		TranslateOverlayToIL(ProcessOverlay("Civ1", "ASound", "ASOUND.CVL", "ASnd", version, codePath), "ASound", codePath);
+		TranslateOverlayToIL(ProcessOverlay("Civ1", "ISound", "ISOUND.CVL", "ISnd", version, codePath), "ISound", codePath);
+		TranslateOverlayToIL(ProcessOverlay("Civ1", "RSound", "RSOUND.CVL", "RSnd", version, codePath), "RSound", codePath);
+		TranslateOverlayToIL(ProcessOverlay("Civ1", "TSound", "TSOUND.CVL", "TSnd", version, codePath), "TSound", codePath);
 
 		getWriter.Close();
 		initWriter.Close();
@@ -830,14 +860,14 @@ internal class Program
 	/// <param name="name">Driver name, used for the console messages</param>
 	/// <param name="fileName">Overlay file name inside GameSRC\Civ1</param>
 	/// <param name="suffix">Suffix appended to the emitted segment names</param>
-	private static Disassembler.MainProgram? ProcessOverlay(string name, string fileName, string suffix, int version, string codePath)
+	private static Disassembler.MainProgram? ProcessOverlay(string gameDir, string name, string fileName, string suffix, int version, string codePath)
 	{
 		Console.WriteLine("* Processing overlay {0}", name);
 
 		try
 		{
-			MZExecutable overlayEXE = new(string.Format("GameSRC{0}Civ1{0}{1}",
-				Path.DirectorySeparatorChar, fileName));
+			MZExecutable overlayEXE = new(string.Format("GameSRC{0}{1}{0}{2}",
+				Path.DirectorySeparatorChar, gameDir, fileName));
 
 			List<ModuleMatch> matches = [];
 			Disassembler.MainProgram disassembler = new Disassembler.MainProgram(overlayEXE, matches, version);

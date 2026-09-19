@@ -175,11 +175,19 @@ namespace Disassembler
 							break;
 
 						// String instructions
+						case CPUInstructionEnum.CMPS:
+							currentNode.AsmInstructions.Add(instruction);
+							break;
+
 						case CPUInstructionEnum.LODS:
 							currentNode.AsmInstructions.Add(instruction);
 							break;
 
 						case CPUInstructionEnum.MOVS:
+							currentNode.AsmInstructions.Add(instruction);
+							break;
+
+						case CPUInstructionEnum.SCAS:
 							currentNode.AsmInstructions.Add(instruction);
 							break;
 
@@ -2917,6 +2925,31 @@ namespace Disassembler
 					break;
 
 				// String instructions
+				case CPUInstructionEnum.CMPS:
+					// compares DS:[SI] against ES:[DI]
+					required |= FlowGraphLocalEnum.DFlag;
+					required |= FlowGraphLocalEnum.SI;
+					required |= FlowGraphLocalEnum.DI;
+					required |= FlowGraphLocalEnum.ES;
+					required |= CPUSegmentRegisterToLocal(instruction.DefaultDataSegment);
+					break;
+
+				case CPUInstructionEnum.SCAS:
+					// compares the accumulator against ES:[DI]
+					required |= FlowGraphLocalEnum.DFlag;
+					required |= FlowGraphLocalEnum.DI;
+					required |= FlowGraphLocalEnum.ES;
+
+					if (instruction.OperandSize == CPUParameterSizeEnum.UInt8)
+					{
+						required |= FlowGraphLocalEnum.AL;
+					}
+					else
+					{
+						required |= FlowGraphLocalEnum.AX;
+					}
+					break;
+
 				case CPUInstructionEnum.LODS:
 					required |= FlowGraphLocalEnum.DFlag;
 					required |= FlowGraphLocalEnum.SI;
@@ -3198,8 +3231,12 @@ namespace Disassembler
 					}
 					break;
 
+				// CMPS and SCAS only set flags, and flags are not tracked as defined locals here,
+				// same as the plain CMP and TEST above
+				case CPUInstructionEnum.CMPS:
 				case CPUInstructionEnum.MOVS:
 				case CPUInstructionEnum.OUTS:
+				case CPUInstructionEnum.SCAS:
 				case CPUInstructionEnum.STOS:
 					break;
 
