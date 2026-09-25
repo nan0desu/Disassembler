@@ -102,9 +102,9 @@ class OverlayContainerTest(unittest.TestCase):
         self.assertEqual(self.overlays[0].code_offset, 0x20EE0)
 
         for previous, overlay in zip(self.overlays, self.overlays[1:]):
-            self.assertEqual(previous.end_offset, overlay.header_offset)
+            self.assertEqual(previous.nominal_end, overlay.header_offset)
 
-        overhang = self.overlays[-1].end_offset - len(self.data)
+        overhang = self.overlays[-1].nominal_end - len(self.data)
         self.assertGreaterEqual(overhang, 0)
         self.assertLess(overhang, 16)
 

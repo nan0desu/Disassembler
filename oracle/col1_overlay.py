@@ -50,7 +50,14 @@ class Overlay:
 
     header_offset: int
     code_offset: int
+
     code_length: int
+    """Readable code bytes. The last overlay is padded to a paragraph, so this is clamped to
+    the end of the file and can be smaller than the header's nominal size."""
+
+    nominal_end: int
+    """Where the header says this image ends, and where the next one begins."""
+
     total_paragraphs: int
     header_paragraphs: int
     constant: int
@@ -145,7 +152,8 @@ def parse_overlays(data):
                 index=index,
                 header_offset=offset,
                 code_offset=code,
-                code_length=end - code,
+                code_length=min(end, len(data)) - code,
+                nominal_end=end,
                 total_paragraphs=total,
                 header_paragraphs=header_paragraphs,
                 constant=constant,
@@ -158,7 +166,7 @@ def parse_overlays(data):
 
     # The last image is padded to a paragraph, so it may overhang the final bytes.
     last = overlays[-1]
-    overhang = last.end_offset - len(data)
+    overhang = last.nominal_end - len(data)
     if not 0 <= overhang < 16:
         raise ValueError(f"overlay chain ends 0x{overhang:X} from EOF, expected under 0x10")
 
