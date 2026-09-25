@@ -38,6 +38,9 @@
 		protected int imageEndPosition = 0;
 		// the overlay container, when the appended data turned out to be one
 		protected MZOverlayContainer? overlayContainer = null;
+		// the overlay manager's segment, worked out from the thunks on first use
+		protected ushort thunkManagerSegment = 0;
+		protected bool thunkManagerSegmentResolved = false;
 
 		protected MZExecutable()
 		{ }
@@ -338,6 +341,201 @@
 				}
 			}
 		}
+
+		#region Overlays
+		/// <summary>
+		/// Number of overlays, whichever scheme this executable uses to store them
+		/// </summary>
+		public int OverlayCount
+		{
+			get
+			{
+				return this.overlayContainer != null
+					? this.overlayContainer.Overlays.Count
+					: this.overlays.Count;
+			}
+		}
+
+		/// <summary>
+		/// Code of a one based overlay number. Civ1 appends its overlays as MZ images and
+		/// Colonization keeps them in a container, but both number them from 1, so callers that
+		/// only want the bytes don't have to care which scheme is in use.
+		/// </summary>
+		public byte[] GetOverlayData(int number)
+		{
+			if (this.overlayContainer != null)
+			{
+				MZOverlay? overlay = this.overlayContainer.GetByNumber(number);
+
+				if (overlay == null)
+				{
+					throw new Exception($"Overlay {number} is out of range");
+				}
+
+				return overlay.Data;
+			}
+
+			if (number < 1 || number > this.overlays.Count)
+			{
+				throw new Exception($"Overlay {number} is out of range");
+			}
+
+			return this.overlays[number - 1].Data;
+		}
+
+		/// <summary>
+		/// Every overlay manager thunk in the load module, in address order.
+		///
+		/// The manager's segment isn't hardcoded: it is whichever segment the largest number of
+		/// candidate thunks call, which both avoids a magic constant and rejects the handful of
+		/// byte sequences in data that happen to have a thunk's shape.
+		/// </summary>
+		public List<MZOverlayThunk> FindThunks()
+		{
+			List<MZOverlayThunk> thunks = new List<MZOverlayThunk>();
+			int overlayCount = this.OverlayCount;
+			ushort managerSegment = this.ThunkManagerSegment;
+
+			if (overlayCount == 0 || managerSegment == 0)
+			{
+				return thunks;
+			}
+
+			int position = 0;
+
+			while (position + MZOverlayThunk.OverlayLength <= this.mainData.Length)
+			{
+				MZOverlayThunk? thunk = ReadThunk(position, managerSegment, overlayCount);
+
+				if (thunk == null)
+				{
+					position++;
+					continue;
+				}
+
+				thunks.Add(thunk);
+				position += thunk.Length;
+			}
+
+			return thunks;
+		}
+
+		/// <summary>
+		/// The thunk at an offset in the load module, or null when there isn't one there.
+		/// Offsets are segment * 16 + offset, the same addressing the load module uses.
+		/// </summary>
+		public MZOverlayThunk? GetThunkAt(int position)
+		{
+			ushort managerSegment = this.ThunkManagerSegment;
+
+			if (managerSegment == 0 || position < 0)
+			{
+				return null;
+			}
+
+			return ReadThunk(position, managerSegment, this.OverlayCount);
+		}
+
+		/// <summary>
+		/// Segment the overlay manager lives in, or 0 when this executable has no thunks.
+		///
+		/// It isn't hardcoded: it is whichever segment the largest number of candidate thunks
+		/// call, which both avoids a magic constant and rejects the handful of byte sequences in
+		/// data that happen to have a thunk's shape.
+		/// </summary>
+		public ushort ThunkManagerSegment
+		{
+			get
+			{
+				if (this.thunkManagerSegmentResolved)
+				{
+					return this.thunkManagerSegment;
+				}
+
+				this.thunkManagerSegmentResolved = true;
+				this.thunkManagerSegment = FindThunkManagerSegment();
+
+				return this.thunkManagerSegment;
+			}
+		}
+
+		private ushort FindThunkManagerSegment()
+		{
+			int overlayCount = this.OverlayCount;
+
+			if (overlayCount == 0)
+			{
+				return 0;
+			}
+
+			Dictionary<ushort, int> candidates = new Dictionary<ushort, int>();
+
+			for (int i = 0; i + MZOverlayThunk.OverlayLength <= this.mainData.Length; i++)
+			{
+				// only overlay thunks vote, their shape is the distinctive one
+				if (this.mainData[i] == 0x9a && this.mainData[i + 5] == 0xea &&
+					ReadUInt16(i + 8) == 0 && IsOverlayNumber(ReadUInt16(i + 10), overlayCount))
+				{
+					ushort segment = ReadUInt16(i + 3);
+					candidates.TryGetValue(segment, out int count);
+					candidates[segment] = count + 1;
+				}
+			}
+
+			ushort managerSegment = 0;
+			int best = 0;
+
+			foreach (KeyValuePair<ushort, int> candidate in candidates)
+			{
+				if (candidate.Value > best)
+				{
+					best = candidate.Value;
+					managerSegment = candidate.Key;
+				}
+			}
+
+			return best == 0 ? (ushort)0 : managerSegment;
+		}
+
+		private static bool IsOverlayNumber(ushort value, int overlayCount)
+		{
+			return value >= 1 && value <= overlayCount;
+		}
+
+		/// <summary>
+		/// Decodes a thunk at an offset in the load module, or returns null if there isn't one
+		/// </summary>
+		private MZOverlayThunk? ReadThunk(int position, ushort managerSegment, int overlayCount)
+		{
+			if (position + MZOverlayThunk.OverlayLength > this.mainData.Length)
+			{
+				return null;
+			}
+
+			if (this.mainData[position] != 0x9a || this.mainData[position + 5] != 0xea ||
+				ReadUInt16(position + 3) != managerSegment)
+			{
+				return null;
+			}
+
+			ushort targetOffset = ReadUInt16(position + 6);
+			ushort targetSegment = ReadUInt16(position + 8);
+
+			if (targetSegment == 0)
+			{
+				ushort number = ReadUInt16(position + 10);
+
+				if (!IsOverlayNumber(number, overlayCount))
+				{
+					return null;
+				}
+
+				return new MZOverlayThunk(position, number, targetOffset, 0);
+			}
+
+			return new MZOverlayThunk(position, 0, targetOffset, targetSegment);
+		}
+		#endregion
 
 		#region Helper functions
 		public static byte ReadByte(Stream stream)

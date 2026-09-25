@@ -144,7 +144,17 @@ namespace Disassembler
 
 				fnSegment.Functions.Add(offset, function);
 
-				function.Disassemble();
+				try
+				{
+					function.Disassemble();
+				}
+				catch (Exception)
+				{
+					// the caller decides what to do about it, this only records that the function
+					// is half built so the writer can leave it out
+					function.DisassemblyFailed = true;
+					throw;
+				}
 			}
 
 			return function;

@@ -1,4 +1,5 @@
 ﻿using Disassembler.CPU;
+using Disassembler.Formats.MZ;
 using IRB.Collections.Generic;
 using System.Reflection.Metadata;
 
@@ -28,6 +29,8 @@ namespace Disassembler
 
 		// Assembly instructions
 		private List<CPUInstruction> asmInstructions = new List<CPUInstruction>();
+		// set when Disassemble() threw, so the writer can leave this function out
+		private bool disassemblyFailed = false;
 
 		public ProgramFunction(ProgramSegment segment, ushort offset, string? name)
 		{
@@ -52,7 +55,7 @@ namespace Disassembler
 
 			if (this.parentSegment.CPUOverlay > 0)
 			{
-				exeData = this.parentSegment.ParentProgram.Executable.Overlays[this.parentSegment.CPUOverlay - 1].Data;
+				exeData = this.parentSegment.ParentProgram.Executable.GetOverlayData(this.parentSegment.CPUOverlay);
 			}
 			else
 			{
@@ -659,6 +662,33 @@ namespace Disassembler
 						asmInstruction.Parameters.Clear();
 						asmInstruction.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Immediate, CPUParameterSizeEnum.UInt8, this.parentSegment.CPUOverlay));
 						asmInstruction.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Immediate, CPUParameterSizeEnum.UInt16, parameter.Value));
+					}
+				}
+				else if (asmInstruction.InstructionType == CPUInstructionEnum.CALLF &&
+					asmInstruction.Parameters[0].Type == CPUParameterTypeEnum.SegmentOffset)
+				{
+					// Colonization calls an overlaid function through a thunk rather than through
+					// an INT 3F, so the far call's target is the trampoline, not the function. The
+					// real address is the overlay number and entry offset the thunk carries, which
+					// is the same pair CallOverlay already expects.
+					MZOverlayThunk? thunk = this.parentSegment.ParentProgram.Executable.GetThunkAt(
+						(int)MainProgram.ToLinearAddress(asmInstruction.Parameters[0].Segment, asmInstruction.Parameters[0].Value));
+
+					if (thunk != null && thunk.IsOverlay)
+					{
+						asmInstruction.InstructionType = CPUInstructionEnum.CallOverlay;
+						asmInstruction.Parameters.Clear();
+						asmInstruction.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Immediate, CPUParameterSizeEnum.UInt8, (uint)thunk.OverlayNumber));
+						asmInstruction.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Immediate, CPUParameterSizeEnum.UInt16, (uint)thunk.TargetOffset));
+					}
+					else if (thunk != null)
+					{
+						// A thunk to an already resident function still has to be stepped over: the
+						// thunk tables are a solid block of trampolines with nothing between them,
+						// so disassembling one as if it were the function walks through every thunk
+						// that follows it and off the end of the load module. Point the call at the
+						// function the thunk names instead.
+						asmInstruction.Parameters[0] = new CPUParameter(thunk.TargetSegment, (uint)thunk.TargetOffset);
 					}
 				}
 			}
@@ -1360,10 +1390,10 @@ namespace Disassembler
 							if (function == null)
 							{
 								// function is not yet defined, define it
-								function = this.parentSegment.ParentProgram.Disassemble(0, this.parentSegment.CPUSegment, (ushort)parameter.Value, null);
+								function = DisassembleCallee(0, this.parentSegment.CPUSegment, (ushort)parameter.Value);
 							}
 
-							function.ReferenceFunctions.Add(this);
+							function?.ReferenceFunctions.Add(this);
 						}
 						break;
 
@@ -1376,10 +1406,10 @@ namespace Disassembler
 							if (function == null)
 							{
 								// function is not yet defined, define it
-								function = this.parentSegment.ParentProgram.Disassemble(0, parameter.Segment, (ushort)parameter.Value, null);
+								function = DisassembleCallee(0, parameter.Segment, (ushort)parameter.Value);
 							}
 
-							function.ReferenceFunctions.Add(this);
+							function?.ReferenceFunctions.Add(this);
 						}
 						break;
 
@@ -1394,10 +1424,10 @@ namespace Disassembler
 						if (function == null)
 						{
 							// function is not yet defined, define it
-							function = this.parentSegment.ParentProgram.Disassemble((ushort)instruction.Parameters[0].Value, 0, (ushort)instruction.Parameters[1].Value, null);
+							function = DisassembleCallee((ushort)instruction.Parameters[0].Value, 0, (ushort)instruction.Parameters[1].Value);
 						}
 
-						function.ReferenceFunctions.Add(this);
+						function?.ReferenceFunctions.Add(this);
 						break;
 
 					case CPUInstructionEnum.JMPF:
@@ -1520,6 +1550,40 @@ namespace Disassembler
 			target.ReferenceCount++;
 
 			return true;
+		}
+
+		/// <summary>
+		/// Disassembles a function this one calls.
+		///
+		/// A callee that fails to disassemble still has to exist as a function: the writer resolves
+		/// every call it emits, so letting the failure escape would abandon the rest of this
+		/// function's calls and leave the writer unable to name them. The failed callee is already
+		/// registered by the time it throws, so it is returned empty rather than not at all.
+		/// </summary>
+		private ProgramFunction? DisassembleCallee(ushort overlay, ushort segment, ushort offset)
+		{
+			try
+			{
+				return this.parentSegment.ParentProgram.Disassemble(overlay, segment, offset, null);
+			}
+			catch (Exception ex)
+			{
+				Console.WriteLine($"Warning, can't disassemble {overlay:x2}:{segment:x4}:{offset:x4} " +
+					$"called from {this.parentSegment.Name}.{this.Name}: {ex.Message}");
+
+				return this.parentSegment.ParentProgram.FindFunction(overlay, segment, offset);
+			}
+		}
+
+		/// <summary>
+		/// True when <see cref="Disassemble"/> threw. Such a function is still registered, so calls
+		/// to it can be resolved by name, but it isn't written out: its instruction list stops
+		/// wherever the failure happened and its jump targets no longer all exist.
+		/// </summary>
+		public bool DisassemblyFailed
+		{
+			get => this.disassemblyFailed;
+			set => this.disassemblyFailed = value;
 		}
 
 		public int GetInstructionPositionByLinearAddress(uint address)
@@ -2256,7 +2320,10 @@ namespace Disassembler
 
 									if (instructionIndex < 0)
 									{
-										throw new Exception($"Can't find instruction in function {this.parentSegment.Name}.{this.Name} at 0x{parameter.Segment:x}:0x{parameter.Value:x}");
+										// A far jump out of the function, not a jump to a label in
+										// it. An overlay thunk ends in one of these, with an overlay
+										// entry id where the address would be.
+										writer.WriteLine($"{GetTabs(tabLevel + 1)}// far jump out of this function, to 0x{parameter.Segment:x4}:0x{parameter.Value:x4}");
 									}
 									else
 									{
@@ -2333,7 +2400,9 @@ namespace Disassembler
 								}
 								else
 								{
-									throw new Exception($"Can't find function 'F0_{parameter.Segment:x4}_{parameter.Value:x4}'");
+									// The callee failed to disassemble, so it was never defined. Leaving a
+									// marker keeps the rest of this function readable instead of losing it.
+									writer.WriteLine($"{GetTabs(tabLevel + 1)}// unresolved call to F0_{parameter.Segment:x4}_{parameter.Value:x4}");
 								}
 							}
 
@@ -2404,7 +2473,9 @@ namespace Disassembler
 								}
 								else
 								{
-									throw new Exception($"Can't find function 'F0_{parameter.Segment:x4}_{parameter.Value:x4}'");
+									// The callee failed to disassemble, so it was never defined. Leaving a
+									// marker keeps the rest of this function readable instead of losing it.
+									writer.WriteLine($"{GetTabs(tabLevel + 1)}// unresolved call to F0_{parameter.Segment:x4}_{parameter.Value:x4}");
 								}
 							}
 							else
@@ -2457,7 +2528,8 @@ namespace Disassembler
 							}
 							else
 							{
-								throw new Exception($"Can't find function 'F{instruction.Parameters[0].Value}_0000_{instruction.Parameters[1].Value:x4}'");
+								// as above, an overlay callee that failed to disassemble
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}// unresolved call to F{instruction.Parameters[0].Value}_0000_{instruction.Parameters[1].Value:x4}");
 							}
 
 							if (verbosity > 0)

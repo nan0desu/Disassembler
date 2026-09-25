@@ -190,8 +190,20 @@ internal class Program
 					mainEXE.ReadUInt16(mainAddress + 8), mainEXE.ReadUInt16(mainAddress + 6));
 				Console.WriteLine("Disassembling the startup code instead, that covers the code kept in the main image");
 
-				ProgramFunction start = mainProgram.Disassemble(0, startup.Crt0Segment, startup.Crt0Offset, "Start");
-				start.ReturnValue = new ILVariable(start, ILVariableScopeEnum.LocalParameter, mainProgram.IntValueType, 0, 10);
+				// Start pulls in the overlays it calls, so a single unhandled function anywhere
+				// below it used to take the whole run with it. Report and carry on instead, the
+				// overlay entry points below cover the same ground from 600 separate roots.
+				try
+				{
+					ProgramFunction start = mainProgram.Disassemble(0, startup.Crt0Segment, startup.Crt0Offset, "Start");
+					start.ReturnValue = new ILVariable(start, ILVariableScopeEnum.LocalParameter, mainProgram.IntValueType, 0, 10);
+				}
+				catch (Exception ex)
+				{
+					Console.WriteLine("Warning: startup code disassembly failed: {0}", ex.Message);
+				}
+
+				DisassembleOverlayEntryPoints(mainEXE, mainProgram);
 			}
 			else
 			{
@@ -222,6 +234,60 @@ internal class Program
 			{
 				Console.WriteLine(ex.StackTrace);
 			}
+		}
+	}
+
+	/// <summary>
+	/// Disassembles every overlay function the resident image has a thunk for.
+	///
+	/// The thunks are the only entry points into the overlays that can be found statically: an
+	/// overlay's code is only reachable from the resident image through one, so the set of thunks
+	/// is the set of externally callable functions. Anything an overlay calls internally is picked
+	/// up by following its own calls from there.
+	///
+	/// A function that fails to disassemble is reported and skipped. There are 600 or so of them
+	/// and they exercise far more of the instruction set than Civ1's sound drivers ever did, so
+	/// one unimplemented corner shouldn't cost the whole run.
+	/// </summary>
+	private static void DisassembleOverlayEntryPoints(MZExecutable mainEXE, MainProgram mainProgram)
+	{
+		List<MZOverlayThunk> thunks = mainEXE.FindThunks();
+		List<MZOverlayThunk> overlayThunks = thunks.FindAll(t => t.IsOverlay);
+
+		Console.WriteLine("Thunks: {0} ({1} into overlays, {2} resident)",
+			thunks.Count, overlayThunks.Count, thunks.Count - overlayThunks.Count);
+
+		HashSet<int> seen = new();
+		Dictionary<string, int> failures = new();
+		int disassembled = 0;
+
+		for (int i = 0; i < overlayThunks.Count; i++)
+		{
+			MZOverlayThunk thunk = overlayThunks[i];
+
+			// several thunks can name the same function
+			if (!seen.Add((thunk.OverlayNumber << 16) | thunk.TargetOffset))
+			{
+				continue;
+			}
+
+			try
+			{
+				mainProgram.Disassemble((ushort)thunk.OverlayNumber, 0, (ushort)thunk.TargetOffset, null);
+				disassembled++;
+			}
+			catch (Exception ex)
+			{
+				failures.TryGetValue(ex.Message, out int count);
+				failures[ex.Message] = count + 1;
+			}
+		}
+
+		Console.WriteLine("Overlay functions: {0} of {1} entry points disassembled", disassembled, seen.Count);
+
+		foreach (KeyValuePair<string, int> failure in failures.OrderByDescending(f => f.Value))
+		{
+			Console.WriteLine("  {0}x {1}", failure.Value, failure.Key);
 		}
 	}
 

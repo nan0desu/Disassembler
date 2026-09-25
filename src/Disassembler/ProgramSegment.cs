@@ -108,6 +108,16 @@ namespace Disassembler
 				for (int j = 0; j < functions.Length; j++)
 				{
 					ProgramFunction function = functions[j];
+
+					// A function that threw part way through disassembly has instructions but no
+					// consistent jump targets or call references, and writing it fails on the first
+					// one that doesn't resolve. Leave a note in its place.
+					if (function.DisassemblyFailed)
+					{
+						writer.WriteLine($"\t\t// {function.Name} could not be disassembled");
+						continue;
+					}
+
 					function.WriteAsmCS(writer, 2, verbosity);
 				}
 
