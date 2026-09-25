@@ -60,7 +60,11 @@ namespace Disassembler
 
 			if (instructionPos < 0)
 			{
-				throw new Exception($"Expected instruction at 0x{this.parentFunction.FunctionEntryPoint:x}");
+				throw new Exception($"Expected instruction at 0x{this.parentFunction.FunctionEntryPoint:x} " +
+					$"in function {this.parentFunction.ParentSegment.Name}.{this.parentFunction.Name}, " +
+					$"has {this.parentFunction.AsmInstructions.Count} instructions at " +
+					string.Join(", ", this.parentFunction.AsmInstructions.ConvertAll(
+						i => $"0x{i.LinearAddress:x}:{i.InstructionType}")));
 			}
 
 			FlowGraphNode currentNode = CreateOrFindNode(this.parentFunction.FunctionEntryPoint, FlowGraphNodeTypeEnum.Block, unprocessedNodes, false);

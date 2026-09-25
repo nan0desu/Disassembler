@@ -712,8 +712,16 @@ namespace Disassembler
 							newAddress = (uint)(fnSegment + parameter.Value);
 
 							// optimize immediate jumps
+							//
+							// Never drop the instruction the function starts on. A jump ends its
+							// block, so the walk carries on at the jump's own target, which puts
+							// that target next in the list however far away it is. A function whose
+							// entry point is a jump to its body therefore looks exactly like a jump
+							// to the next instruction, and removing it left the function with no
+							// instruction at its entry address at all.
 							if (i + 1 < this.asmInstructions.Count &&
-								this.asmInstructions[i + 1].LinearAddress == newAddress)
+								this.asmInstructions[i + 1].LinearAddress == newAddress &&
+								instruction.LinearAddress != this.fnEntryPoint)
 							{
 								// this is just a jump to next instruction, ignore it
 								this.asmInstructions[i].InstructionType = CPUInstructionEnum.NOP;
@@ -938,7 +946,24 @@ namespace Disassembler
 										}
 										else if (varOffset > 0)
 										{
-											throw new Exception($"Local parameters can't be indexed with SI in {this.ParentSegment.Name}.{this.Name} at 0x{this.fnOffset:x}");
+											// A parameter indexed by SI, which is what an aggregate
+											// passed on the stack looks like. Same shape as the local
+											// variable above, on the other side of the frame pointer.
+											instruction.Parameters[j] = new CPUParameter(CPUParameterTypeEnum.LocalParameterWithSI,
+												CPUParameterSizeEnum.UInt16, CPUSegmentRegisterEnum.SS, 0, varOffset);
+
+											if (!this.localParameters.ContainsKey(varOffset))
+											{
+												ILVariable indexedParameter = new ILVariable(this, ILVariableScopeEnum.LocalParameter,
+													this.parentSegment.ParentProgram.FromCPUParameterSizeEnum(instruction.OperandSize), varOffset);
+												indexedParameter.ArraySize = 1;
+												this.localParameters.Add(varOffset, indexedParameter);
+											}
+											else
+											{
+												// ensure that we mark this as an array
+												this.localParameters.GetValueByKey(varOffset).ArraySize = 1;
+											}
 										}
 										break;
 
@@ -975,7 +1000,22 @@ namespace Disassembler
 										}
 										else if (varOffset > 0)
 										{
-											throw new Exception($"Local parameters can't be indexed with DI in {this.ParentSegment.Name}.{this.Name} at 0x{this.fnOffset:x}");
+											// as above, a stack passed aggregate indexed by DI
+											instruction.Parameters[j] = new CPUParameter(CPUParameterTypeEnum.LocalParameterWithDI,
+												CPUParameterSizeEnum.UInt16, CPUSegmentRegisterEnum.SS, 0, varOffset);
+
+											if (!this.localParameters.ContainsKey(varOffset))
+											{
+												ILVariable indexedParameter = new ILVariable(this, ILVariableScopeEnum.LocalParameter,
+													this.parentSegment.ParentProgram.FromCPUParameterSizeEnum(instruction.OperandSize), varOffset);
+												indexedParameter.ArraySize = 1;
+												this.localParameters.Add(varOffset, indexedParameter);
+											}
+											else
+											{
+												// ensure that we mark this as an array
+												this.localParameters.GetValueByKey(varOffset).ArraySize = 1;
+											}
 										}
 										break;
 
