@@ -33,6 +33,11 @@
 		protected List<MZExecutable> overlays = new List<MZExecutable>();
 		// where the appended data stopped being a chain of MZ overlays, -1 when it never did
 		protected int unknownTrailingDataPosition = -1;
+		// end of the load module. Not the same as pages * 512, which rounds up to a whole page
+		// whenever extra bytes is set, and is what the overlay walk below starts from.
+		protected int imageEndPosition = 0;
+		// the overlay container, when the appended data turned out to be one
+		protected MZOverlayContainer? overlayContainer = null;
 
 		protected MZExecutable()
 		{ }
@@ -57,6 +62,12 @@
 				if (ReadUInt16(stream) != 0x5a4d)
 				{
 					this.unknownTrailingDataPosition = filePosition;
+
+					// Colonization's container starts at the first paragraph after the load module,
+					// not at filePosition: that is the page boundary, which overshoots by up to a
+					// page whenever the header's extra bytes field is set.
+					this.overlayContainer = MZOverlayContainer.TryRead(stream,
+						(this.imageEndPosition + 15) & ~15);
 					break;
 				}
 
@@ -173,6 +184,7 @@
 
 			// read data
 			int dataSize = (extraBytes > 0) ? (((pages - 1) * 512) + extraBytes) - (headerSize * 16) : (pages * 512) - (headerSize * 16);
+			exe.imageEndPosition = position + (headerSize * 16) + dataSize;
 			stream.Seek(position + (headerSize * 16), SeekOrigin.Begin);
 
 			exe.mainData = new byte[dataSize];
@@ -460,6 +472,25 @@
 		public int UnknownTrailingDataPosition
 		{
 			get { return this.unknownTrailingDataPosition; }
+		}
+
+		/// <summary>
+		/// File offset where the load module ends. The overlay walk starts from the end of the
+		/// last whole page instead, which is the same thing only when extra bytes is zero.
+		/// </summary>
+		public int ImageEndPosition
+		{
+			get { return this.imageEndPosition; }
+		}
+
+		/// <summary>
+		/// The overlay container appended after the load module, or null when the trailing data
+		/// isn't one. Civ1 has no container, its overlays are a chain of MZ images in
+		/// <see cref="Overlays"/>.
+		/// </summary>
+		public MZOverlayContainer? OverlayContainer
+		{
+			get { return this.overlayContainer; }
 		}
 	}
 }

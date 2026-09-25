@@ -4,6 +4,7 @@ using Disassembler.Formats.MZ;
 using Disassembler.Formats.OMF;
 using IRB.Collections.Generic;
 using System.Reflection;
+using System.Text;
 using System.Text.RegularExpressions;
 
 internal class Program
@@ -152,7 +153,17 @@ internal class Program
 			Console.WriteLine("DGROUP {0:x4}, main at {1:x4}:{2:x4}",
 				startup.DataSegment, startup.MainSegment, startup.MainOffset);
 
-			if (mainEXE.UnknownTrailingDataPosition >= 0)
+			if (mainEXE.OverlayContainer != null)
+			{
+				MZOverlayContainer container = mainEXE.OverlayContainer;
+
+				Console.WriteLine("Overlay container at 0x{0:x}, {1} overlays, {2} bytes",
+					container.Position, container.Overlays.Count,
+					container.Overlays.Sum(o => o.Data.Length));
+
+				WriteOverlayDirectory(container, codePath);
+			}
+			else if (mainEXE.UnknownTrailingDataPosition >= 0)
 			{
 				Console.WriteLine("Overlays not loaded, unrecognised container at file offset 0x{0:x}",
 					mainEXE.UnknownTrailingDataPosition);
@@ -212,6 +223,38 @@ internal class Program
 				Console.WriteLine(ex.StackTrace);
 			}
 		}
+	}
+
+	/// <summary>
+	/// Writes the overlay directory next to the generated code, in the shape
+	/// oracle/col1_overlay.py emits, so the two decoders can be compared entry by entry:
+	///
+	///   COL1_DIRECTORY_JSON=&lt;this file&gt; python3 -m unittest discover -s oracle
+	/// </summary>
+	private static void WriteOverlayDirectory(MZOverlayContainer container, string codePath)
+	{
+		string path = $"{codePath}{Path.DirectorySeparatorChar}overlay-directory.json";
+		StringBuilder json = new();
+
+		json.AppendLine("[");
+
+		for (int i = 0; i < container.Overlays.Count; i++)
+		{
+			MZOverlay overlay = container.Overlays[i];
+
+			json.AppendLine("  {");
+			json.AppendLine($"    \"index\": {overlay.Index},");
+			json.AppendLine($"    \"header\": {overlay.HeaderPosition},");
+			json.AppendLine($"    \"code\": {overlay.CodePosition},");
+			json.AppendLine($"    \"length\": {overlay.Data.Length},");
+			json.AppendLine($"    \"relocations\": {overlay.Relocations.Count}");
+			json.AppendLine(i < container.Overlays.Count - 1 ? "  }," : "  }");
+		}
+
+		json.AppendLine("]");
+
+		File.WriteAllText(path, json.ToString());
+		Console.WriteLine("Overlay directory written to {0}", path);
 	}
 
 	private static void ParseDOSEXE(string path, int version)
