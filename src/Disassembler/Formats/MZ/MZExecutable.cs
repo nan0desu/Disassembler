@@ -403,7 +403,7 @@
 
 			int position = 0;
 
-			while (position + MZOverlayThunk.OverlayLength <= this.mainData.Length)
+			while (position + MZOverlayThunk.ResidentLength <= this.mainData.Length)
 			{
 				MZOverlayThunk? thunk = ReadThunk(position, managerSegment, overlayCount);
 
@@ -507,13 +507,7 @@
 		/// </summary>
 		private MZOverlayThunk? ReadThunk(int position, ushort managerSegment, int overlayCount)
 		{
-			if (position + MZOverlayThunk.OverlayLength > this.mainData.Length)
-			{
-				return null;
-			}
-
-			if (this.mainData[position] != 0x9a || this.mainData[position + 5] != 0xea ||
-				ReadUInt16(position + 3) != managerSegment)
+			if (!IsThunkStart(position, managerSegment) || position + MZOverlayThunk.ShortOverlayLength > this.mainData.Length)
 			{
 				return null;
 			}
@@ -521,19 +515,34 @@
 			ushort targetOffset = ReadUInt16(position + 6);
 			ushort targetSegment = ReadUInt16(position + 8);
 
-			if (targetSegment == 0)
+			// a resident target can be in segment 0 too, the overlay number is what tells them apart
+			if (targetSegment == 0 && IsOverlayNumber(ReadUInt16(position + 10), overlayCount))
 			{
 				ushort number = ReadUInt16(position + 10);
 
-				if (!IsOverlayNumber(number, overlayCount))
+				// the segment word is left out when another thunk follows straight away
+				if (position + MZOverlayThunk.OverlayLength > this.mainData.Length ||
+					IsThunkStart(position + MZOverlayThunk.ShortOverlayLength, managerSegment))
 				{
-					return null;
+					return new MZOverlayThunk(position, MZOverlayThunk.ShortOverlayLength, number, targetOffset, 0);
 				}
 
-				return new MZOverlayThunk(position, number, targetOffset, 0);
+				return new MZOverlayThunk(position, MZOverlayThunk.OverlayLength, number, targetOffset,
+					ReadUInt16(position + MZOverlayThunk.ShortOverlayLength));
 			}
 
-			return new MZOverlayThunk(position, 0, targetOffset, targetSegment);
+			return new MZOverlayThunk(position, MZOverlayThunk.ResidentLength, 0, targetOffset, targetSegment);
+		}
+
+		/// <summary>
+		/// True when the bytes at an offset in the load module start a CALL FAR into the overlay
+		/// manager followed by a JMP FAR, which every kind of thunk does
+		/// </summary>
+		private bool IsThunkStart(int position, ushort managerSegment)
+		{
+			return position + MZOverlayThunk.ResidentLength <= this.mainData.Length &&
+				this.mainData[position] == 0x9a && this.mainData[position + 5] == 0xea &&
+				ReadUInt16(position + 3) == managerSegment;
 		}
 		#endregion
 

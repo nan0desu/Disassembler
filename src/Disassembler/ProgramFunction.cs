@@ -662,6 +662,12 @@ namespace Disassembler
 						asmInstruction.Parameters.Clear();
 						asmInstruction.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Immediate, CPUParameterSizeEnum.UInt8, this.parentSegment.CPUOverlay));
 						asmInstruction.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Immediate, CPUParameterSizeEnum.UInt16, parameter.Value));
+
+						// a near call stays within the segment of the overlay it is made from
+						if (this.parentSegment.CPUSegment != 0)
+						{
+							asmInstruction.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Immediate, CPUParameterSizeEnum.UInt16, this.parentSegment.CPUSegment));
+						}
 					}
 				}
 				else if (asmInstruction.InstructionType == CPUInstructionEnum.CALLF &&
@@ -669,8 +675,8 @@ namespace Disassembler
 				{
 					// Colonization calls an overlaid function through a thunk rather than through
 					// an INT 3F, so the far call's target is the trampoline, not the function. The
-					// real address is the overlay number and entry offset the thunk carries, which
-					// is the same pair CallOverlay already expects.
+					// real address is the overlay number, segment and entry offset the thunk
+					// carries, the segment going after the pair CallOverlay already expects.
 					MZOverlayThunk? thunk = this.parentSegment.ParentProgram.Executable.GetThunkAt(
 						(int)MainProgram.ToLinearAddress(asmInstruction.Parameters[0].Segment, asmInstruction.Parameters[0].Value));
 
@@ -680,6 +686,7 @@ namespace Disassembler
 						asmInstruction.Parameters.Clear();
 						asmInstruction.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Immediate, CPUParameterSizeEnum.UInt8, (uint)thunk.OverlayNumber));
 						asmInstruction.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Immediate, CPUParameterSizeEnum.UInt16, (uint)thunk.TargetOffset));
+						asmInstruction.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Immediate, CPUParameterSizeEnum.UInt16, thunk.TargetSegment));
 					}
 					else if (thunk != null)
 					{
@@ -1459,12 +1466,12 @@ namespace Disassembler
 							throw new Exception("Overlay manager references overlay 0");
 						}
 
-						function = this.parentSegment.ParentProgram.FindFunction((ushort)instruction.Parameters[0].Value, 0, (ushort)instruction.Parameters[1].Value);
+						function = this.parentSegment.ParentProgram.FindFunction((ushort)instruction.Parameters[0].Value, instruction.CallOverlaySegment, (ushort)instruction.Parameters[1].Value);
 
 						if (function == null)
 						{
 							// function is not yet defined, define it
-							function = DisassembleCallee((ushort)instruction.Parameters[0].Value, 0, (ushort)instruction.Parameters[1].Value);
+							function = DisassembleCallee((ushort)instruction.Parameters[0].Value, instruction.CallOverlaySegment, (ushort)instruction.Parameters[1].Value);
 						}
 
 						function?.ReferenceFunctions.Add(this);
@@ -2542,7 +2549,7 @@ namespace Disassembler
 								//writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PushUInt32(0); // stack management - push return segment, offset");
 							}
 
-							function1 = this.parentSegment.ParentProgram.FindFunction((ushort)instruction.Parameters[0].Value, 0, (ushort)instruction.Parameters[1].Value);
+							function1 = this.parentSegment.ParentProgram.FindFunction((ushort)instruction.Parameters[0].Value, instruction.CallOverlaySegment, (ushort)instruction.Parameters[1].Value);
 							if (function1 != null)
 							{
 								if ((function1.FunctionOptions & ProgramFunctionOptionsEnum.Far) != ProgramFunctionOptionsEnum.Far && (function1.FunctionOptions & ProgramFunctionOptionsEnum.Near) == ProgramFunctionOptionsEnum.Near)

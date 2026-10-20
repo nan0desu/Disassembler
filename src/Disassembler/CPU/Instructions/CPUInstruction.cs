@@ -219,6 +219,18 @@ namespace Disassembler.CPU
 			}
 		}
 
+		/// <summary>
+		/// Segment within the overlay a CallOverlay targets. INT 3F calls carry only the overlay
+		/// and the offset, the target is then in the overlay's first segment.
+		/// </summary>
+		public ushort CallOverlaySegment
+		{
+			get
+			{
+				return this.aParameters.Count > 2 ? (ushort)this.aParameters[2].Value : (ushort)0;
+			}
+		}
+
 		public bool FPUDestination0
 		{
 			get
@@ -1390,7 +1402,14 @@ namespace Disassembler.CPU
 					break;
 
 				case CPUInstructionEnum.CallOverlay:
-					sbValue.AppendFormat("CALLOverlay {0}:{1}(...)", this.aParameters[0].Value, this.aParameters[1].Value);
+					if (this.aParameters.Count > 2)
+					{
+						sbValue.AppendFormat("CALLOverlay {0}:{1:x}:{2}(...)", this.aParameters[0].Value, this.aParameters[2].Value, this.aParameters[1].Value);
+					}
+					else
+					{
+						sbValue.AppendFormat("CALLOverlay {0}:{1}(...)", this.aParameters[0].Value, this.aParameters[1].Value);
+					}
 					break;
 
 				default:

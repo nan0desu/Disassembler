@@ -77,6 +77,10 @@ namespace Disassembler
 				{
 					writer.WriteLine($"\t\t// Segment 0x{this.CPUSegment:x}");
 				}
+				else if (this.CPUSegment != 0)
+				{
+					writer.WriteLine($"\t\t// Overlay 0x{this.CPUOverlay:x}, segment 0x{this.CPUSegment:x}");
+				}
 				else
 				{
 					writer.WriteLine($"\t\t// Overlay 0x{this.CPUOverlay:x}");
@@ -181,7 +185,11 @@ namespace Disassembler
 					}
 				}
 
-				if (MainProgram.ToCPUOverlay(this.segment) != 0)
+				if (MainProgram.ToCPUOverlay(this.segment) != 0 && this.CPUSegment != 0)
+				{
+					return $"Ovr{this.ordinal}_{this.CPUSegment:x}";
+				}
+				else if (MainProgram.ToCPUOverlay(this.segment) != 0)
 				{
 					return $"Ovr{this.ordinal}";
 				}

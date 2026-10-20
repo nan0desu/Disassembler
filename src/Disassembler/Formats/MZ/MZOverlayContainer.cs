@@ -12,11 +12,12 @@
 	///   +0x04  u32         700 in every image of the Colonization build
 	///   +0x08  u32         relocation count
 	///   +0x0C  u32         zero
-	///   +0x10  u32[count]  relocation offsets, then zero padding up to the code
+	///   +0x10  u16 offset, u16 segment [count]  relocations, then zero padding up to the code
 	///
 	/// with the next image at header + (the word at +0x00) * 16, the chain ending at the end of
-	/// the file. Overlay code is reached from the resident image through thunks, and a thunk's
-	/// target is simply the overlay's code position plus the entry offset the thunk carries.
+	/// the file. An overlay's code is several segments laid end to end, and both a relocation's
+	/// segment and the one a thunk carries are paragraphs from the start of the overlay's code.
+	/// A thunk's target is the overlay's code position plus segment * 16 plus the entry offset.
 	/// </summary>
 	public class MZOverlayContainer
 	{
@@ -80,7 +81,10 @@
 
 					for (int i = 0; i < relocationCount; i++)
 					{
-						relocations.Add(MZExecutable.ReadUInt16(stream) | (MZExecutable.ReadUInt16(stream) << 16));
+						int relocationOffset = MZExecutable.ReadUInt16(stream);
+						int relocationSegment = MZExecutable.ReadUInt16(stream);
+
+						relocations.Add((relocationSegment * 16) + relocationOffset);
 					}
 
 					// the last overlay is padded to a paragraph, so it can overhang the final bytes
@@ -161,19 +165,20 @@
 		}
 
 		/// <summary>
-		/// File offset an overlay thunk points at, or -1 when the entry offset falls outside the
-		/// overlay it names.
+		/// File offset an overlay thunk points at, or -1 when the entry falls outside the overlay
+		/// it names. <paramref name="segment"/> is in paragraphs from the start of the overlay's code.
 		/// </summary>
-		public int Resolve(int overlayNumber, int entryOffset)
+		public int Resolve(int overlayNumber, int segment, int entryOffset)
 		{
 			MZOverlay? overlay = GetByNumber(overlayNumber);
+			int address = (segment * 16) + entryOffset;
 
-			if (overlay == null || entryOffset < 0 || entryOffset >= overlay.Data.Length)
+			if (overlay == null || segment < 0 || entryOffset < 0 || address >= overlay.Data.Length)
 			{
 				return -1;
 			}
 
-			return overlay.CodePosition + entryOffset;
+			return overlay.CodePosition + address;
 		}
 
 		/// <summary>

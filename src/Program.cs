@@ -257,7 +257,7 @@ internal class Program
 		Console.WriteLine("Thunks: {0} ({1} into overlays, {2} resident)",
 			thunks.Count, overlayThunks.Count, thunks.Count - overlayThunks.Count);
 
-		HashSet<int> seen = new();
+		HashSet<long> seen = new();
 		Dictionary<string, int> failures = new();
 		int disassembled = 0;
 
@@ -266,14 +266,14 @@ internal class Program
 			MZOverlayThunk thunk = overlayThunks[i];
 
 			// several thunks can name the same function
-			if (!seen.Add((thunk.OverlayNumber << 16) | thunk.TargetOffset))
+			if (!seen.Add(((long)thunk.OverlayNumber << 32) | ((long)thunk.TargetSegment << 16) | (long)thunk.TargetOffset))
 			{
 				continue;
 			}
 
 			try
 			{
-				mainProgram.Disassemble((ushort)thunk.OverlayNumber, 0, (ushort)thunk.TargetOffset, null);
+				mainProgram.Disassemble((ushort)thunk.OverlayNumber, thunk.TargetSegment, (ushort)thunk.TargetOffset, null);
 				disassembled++;
 			}
 			catch (Exception ex)

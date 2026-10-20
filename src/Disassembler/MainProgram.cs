@@ -193,6 +193,7 @@ namespace Disassembler
 			uint[] segmentOffsets = this.segments.Keys.ToArray();
 			int segmentOrdinal = 0;
 			int overlayOrdinal = 0;
+			ushort previousOverlay = 0;
 
 			Array.Sort(segmentOffsets);
 
@@ -202,8 +203,14 @@ namespace Disassembler
 				ProgramSegment segment = this.segments.GetValueByKey(segmentOffsets[i]);
 
 				// differentiate between overlay and segments from main exe
-				if (segment.CPUOverlay > 0)
+				if (segment.CPUOverlay > 0 && segment.CPUOverlay == previousOverlay)
 				{
+					// another code segment of the same overlay, the name tells them apart
+					segment.Ordinal = overlayOrdinal - 1;
+				}
+				else if (segment.CPUOverlay > 0)
+				{
+					previousOverlay = segment.CPUOverlay;
 					segment.Ordinal = overlayOrdinal++;
 
 					if (this.version == 1 && overlayOrdinal == 15)

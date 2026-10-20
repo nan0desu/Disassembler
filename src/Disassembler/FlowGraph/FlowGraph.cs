@@ -1120,7 +1120,7 @@ namespace Disassembler
 								break;
 
 							case CPUInstructionEnum.CallOverlay:
-								function = this.parentFunction.ParentSegment.ParentProgram.FindFunction((ushort)instruction.Parameters[0].Value, 0, (ushort)instruction.Parameters[1].Value);
+								function = this.parentFunction.ParentSegment.ParentProgram.FindFunction((ushort)instruction.Parameters[0].Value, instruction.CallOverlaySegment, (ushort)instruction.Parameters[1].Value);
 
 								if (function != null)
 								{

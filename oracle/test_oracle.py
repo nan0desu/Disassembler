@@ -56,6 +56,16 @@ THUNK_TARGETS = [
     (0x1A1F, 0x021C, 18, 0x057A, 0x603DA, "unload_list_get"),
 ]
 
+# Thunks into an overlay's later code segments: (site, overlay, length, segment, entry,
+# target, first bytes). Taking the entry as relative to the start of the overlay lands
+# these in the middle of an instruction; relative to their segment, each is an ENTER.
+SEGMENT_THUNKS = [
+    (0x1C962, 27, 14, 0x017, 0x0002, 0x76642, "c8 0e 02 00", "segment word inside a run"),
+    (0x1D5D8, 28, 14, 0x08A, 0x0004, 0x776F4, "c8 02 00 00", "last thunk of a run"),
+    (0x1C4CA, 4, 14, 0x642, 0x0006, 0x36976, "c8 02 00 00", "segment with no relocations"),
+    (0x1BB84, 2, 12, 0x000, 0x4DA6, 0x2A6A6, "c8 0e 00 00", "short form, unload"),
+]
+
 # skip_test, in full. 'and ax,[bx+0x20]' is the boycott bitmap at +0x20 of the nation
 # record, which is where ANALYSIS.md independently places it from the save file.
 SKIP_TEST = "55 8b ec b8 01 00 8a 4e 06 d3 e0 8b 1e fc 84 23 47 20 c9 cb"
@@ -78,6 +88,30 @@ def _load():
 
 def _hex(data, offset, length):
     return " ".join(f"{b:02x}" for b in data[offset : offset + length])
+
+
+def _looks_like_function_start(data, overlay, target):
+    """A frame prologue, or code that can only be entered from outside: the start of the
+    overlay, or right after a return or an unconditional jump."""
+    head = data[target : target + 4]
+    if head[:3] == b"\x55\x8b\xec" or (head[0] == 0xC8 and head[3] == 0):
+        return True
+    if target == overlay.code_offset:
+        return True
+    ends = [target]
+    # functions are word aligned, odd length code ahead of one is padded with a zero
+    if data[target - 1] == 0x00 and (target - overlay.code_offset) % 2 == 0:
+        ends.append(target - 1)
+    for end in ends:
+        before = data[end - 5 : end]
+        if (
+            before[-1] in (0xC3, 0xCB, 0x90)
+            or before[-3] in (0xC2, 0xCA, 0xE9)
+            or before[-2] == 0xEB
+            or before[0] == 0xEA
+        ):
+            return True
+    return False
 
 
 class OverlayContainerTest(unittest.TestCase):
@@ -116,12 +150,46 @@ class OverlayContainerTest(unittest.TestCase):
         thunks = col1.enumerate_thunks(self.data, len(self.overlays))
         overlay_thunks = [t for t in thunks if t.kind == "overlay"]
 
-        self.assertGreater(len(overlay_thunks), 600)
+        self.assertEqual(len(overlay_thunks), 658)
         for thunk in overlay_thunks:
-            self.assertIsNotNone(
-                col1.resolve(self.overlays, thunk),
-                f"thunk at 0x{thunk.site:X} -> overlay {thunk.overlay} +0x{thunk.target_offset:X}",
+            label = (f"thunk at 0x{thunk.site:X} -> overlay {thunk.overlay} "
+                     f"{thunk.target_segment:X}:{thunk.target_offset:X}")
+            target = col1.resolve(self.overlays, thunk)
+
+            self.assertIsNotNone(target, label)
+            # being inside the overlay is a weak check: a target taken relative to the wrong
+            # base is inside it too, just in the middle of an instruction
+            self.assertTrue(
+                _looks_like_function_start(self.data, self.overlays[thunk.overlay - 1], target),
+                label,
             )
+
+    def test_segment_thunks_resolve_to_function_entries(self):
+        for site, number, length, segment, entry, target, expected, label in SEGMENT_THUNKS:
+            with self.subTest(label):
+                thunk = col1.read_thunk(self.data, site, len(self.overlays))
+
+                self.assertIsNotNone(thunk, f"no thunk at 0x{site:X}")
+                self.assertEqual(thunk.kind, "overlay")
+                self.assertEqual(thunk.overlay, number)
+                self.assertEqual(thunk.length, length)
+                self.assertEqual(thunk.target_segment, segment)
+                self.assertEqual(thunk.target_offset, entry)
+                self.assertEqual(col1.resolve(self.overlays, thunk), target)
+                self.assertEqual(_hex(self.data, target, 4), expected)
+
+    def test_relocations_are_far_call_segments_inside_the_code(self):
+        far_calls = 0
+
+        for overlay in self.overlays:
+            for relocation in overlay.reloc_offsets:
+                self.assertTrue(0 <= relocation and relocation + 2 <= overlay.code_length,
+                                f"overlay {overlay.index} relocation 0x{relocation:X}")
+                if self.data[overlay.code_offset + relocation - 3] == 0x9A:
+                    far_calls += 1
+
+        # the rest are far jumps and far pointers
+        self.assertEqual(far_calls, 7973)
 
     def test_repo_offsets_land_where_the_decoder_says(self):
         for offset, expected, overlay_number, label in REPO_SITES:

@@ -3,7 +3,8 @@
 	/// <summary>
 	/// One overlay image from the container appended to an overlaid MicroSoft C executable.
 	/// Unlike a Civ1 overlay this is not an MZ image of its own, it is a small header followed
-	/// by a flat block of code that the overlay manager loads as a single segment.
+	/// by a block of code that the overlay manager loads in one piece. The block holds one or more
+	/// code segments, each starting on a paragraph, that are addressed relative to their own start.
 	/// </summary>
 	public class MZOverlay
 	{
@@ -67,12 +68,9 @@
 		}
 
 		/// <summary>
-		/// Offsets into <see cref="Data"/> of the segment words that need relocating.
-		///
-		/// Not every entry is usable: in most overlays they all fall inside the code and point at
-		/// the segment word of a far call, but a few overlays carry entries past the end of their
-		/// code, so the count evidently covers more than one kind of record. Use
-		/// <see cref="RelocationsWithinCode"/> until that is decoded.
+		/// Offsets into <see cref="Data"/> of the segment words that need relocating, already
+		/// converted from the segment:offset pairs the header stores. In the Colonization build
+		/// every one of them falls inside the code, nearly all on the segment word of a far call.
 		/// </summary>
 		public List<int> Relocations
 		{

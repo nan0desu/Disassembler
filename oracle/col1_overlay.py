@@ -15,14 +15,26 @@ overlay images, each one:
     +0x04  u32         700 in every image in this build
     +0x08  u32         relocation count
     +0x0C  u32         zero
-    +0x10  u32[count]  relocation offsets, then zero padding up to the code
+    +0x10  (u16 offset, u16 segment)[count]  relocations, then zero padding up to the code
 
 The next image starts at header + (field at +0x00) * 16, and the chain ends at EOF.
+
+An overlay's code is several code segments laid end to end, each on a paragraph. A
+relocation's segment is a paragraph from the start of the overlay's code, so the word to
+fix up is at `code + segment * 16 + offset`.
 
 Overlay code is reached from the resident image through thunks. The segment in a thunk's
 far call is a link time segment relative to the load module, so a thunk site is at
 `load_module + seg * 16 + off` -- not at the runtime address, which is what makes these
-targets look like string data when resolved against a running process.
+targets look like string data when resolved against a running process. Thunks come in
+three shapes:
+
+    overlay, 14 bytes:  call far manager:0DAB; jmp far 0000:entry; u16 overlay; u16 segment
+    overlay, 12 bytes:  call far manager:0DAB; jmp far 0000:entry; u16 overlay
+    resident, 10 bytes: call far manager:0D91; jmp far segment:offset
+
+The short overlay form only ever appears directly in front of another thunk, and targets
+the overlay's first segment. An overlay target is at `code + segment * 16 + entry`.
 """
 
 import struct
@@ -82,13 +94,17 @@ class Thunk:
     """'overlay' or 'resident'."""
 
     target_offset: int
-    """Entry offset within the overlay, or the offset of a resident target."""
+    """Entry offset within the target's segment."""
+
+    length: int
+    """14 or 12 for an overlay thunk, 10 for a resident one."""
 
     overlay: int = 0
     """Overlay number, 0 for a resident thunk."""
 
     target_segment: int = 0
-    """Link time segment of a resident target, 0 for an overlay thunk."""
+    """Link time segment of a resident target, or for an overlay thunk the paragraph its
+    segment starts at within the overlay's code."""
 
 
 def _u16(data, offset):
@@ -157,7 +173,10 @@ def parse_overlays(data):
                 total_paragraphs=total,
                 header_paragraphs=header_paragraphs,
                 constant=constant,
-                reloc_offsets=[_u32(data, offset + 16 + 4 * i) for i in range(count)],
+                reloc_offsets=[
+                    _u16(data, offset + 18 + 4 * i) * 16 + _u16(data, offset + 16 + 4 * i)
+                    for i in range(count)
+                ],
             )
         )
 
@@ -178,32 +197,42 @@ def thunk_site(data, segment, offset):
     return load_module_offset(data) + segment * 16 + offset
 
 
+def _is_thunk_start(data, site):
+    """A far call into the overlay manager followed by a far jump, which every thunk is."""
+    return (
+        site + 10 <= len(data)
+        and data[site] == 0x9A
+        and data[site + 5] == 0xEA
+        and _u16(data, site + 3) == OVERLAY_MANAGER
+    )
+
+
 def read_thunk(data, site, overlay_count):
     """Decode a thunk at `site`, or None if there isn't one there.
 
-    An overlay thunk is 12 bytes and a resident thunk is 10. `overlay_count` rejects the
-    handful of byte sequences in data that happen to match the shape.
+    `overlay_count` tells an overlay thunk from a resident thunk into link segment 0, and
+    rejects the handful of byte sequences in data that happen to match the shape.
     """
-    if site + 12 > len(data):
-        return None
-    if data[site] != 0x9A or data[site + 5] != 0xEA:
-        return None
-    if _u16(data, site + 3) != OVERLAY_MANAGER:
+    if site + 12 > len(data) or not _is_thunk_start(data, site):
         return None
 
     target_offset = _u16(data, site + 6)
     target_segment = _u16(data, site + 8)
+    number = _u16(data, site + 10)
 
-    if target_segment == 0:
-        number = _u16(data, site + 10)
-        if not 1 <= number <= overlay_count:
-            return None
-        return Thunk(site=site, kind="overlay", target_offset=target_offset, overlay=number)
+    if target_segment == 0 and 1 <= number <= overlay_count:
+        # the segment word is left out when another thunk follows straight away
+        if site + 14 > len(data) or _is_thunk_start(data, site + 12):
+            return Thunk(site=site, kind="overlay", target_offset=target_offset,
+                         length=12, overlay=number)
+        return Thunk(site=site, kind="overlay", target_offset=target_offset, length=14,
+                     overlay=number, target_segment=_u16(data, site + 12))
 
     return Thunk(
         site=site,
         kind="resident",
         target_offset=target_offset,
+        length=10,
         target_segment=target_segment,
     )
 
@@ -220,7 +249,7 @@ def enumerate_thunks(data, overlay_count):
             offset += 1
         else:
             thunks.append(thunk)
-            offset += 12 if thunk.kind == "overlay" else 10
+            offset += thunk.length
 
     return thunks
 
@@ -230,7 +259,7 @@ def resolve(overlays, thunk):
     if thunk.kind != "overlay":
         return None
     overlay = overlays[thunk.overlay - 1]
-    target = overlay.code_offset + thunk.target_offset
+    target = overlay.code_offset + thunk.target_segment * 16 + thunk.target_offset
     return target if overlay.contains(target) else None
 
 
