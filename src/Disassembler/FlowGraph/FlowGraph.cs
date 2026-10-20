@@ -991,32 +991,16 @@ namespace Disassembler
 										throw new Exception($"In function {this.parentFunction.ParentSegment.Name}.{this.parentFunction.Name}, the DS segment register is pushed more than once onto the stack");
 									}
 
+									if (!EveryReturnPops(instruction))
+									{
+										break;
+									}
+
 									this.usesDS = true;
 
 									startNode.AsmInstructions.Add(instruction);
 									startNode1.AsmInstructions.RemoveAt(0);
-
-									// move matched instruction to endBlock
-									for (int i = 0; i < endNode.ReferenceNodes.Count; i++)
-									{
-										FlowGraphNode endNode1 = endNode.ReferenceNodes[i].Value;
-										int endNode1InstructionCount = endNode1.AsmInstructions.Count;
-										instruction1 = endNode1.AsmInstructions[endNode1InstructionCount - 1];
-
-										if (instruction1.InstructionType != CPUInstructionEnum.POP ||
-											instruction.Parameters.Count != instruction1.Parameters.Count ||
-											!instruction.Parameters[0].Equals(instruction1.Parameters[0]))
-										{
-											throw new Exception($"Can't match start and end block BP frame instructions");
-										}
-
-										if (i == 0)
-										{
-											endNode.AsmInstructions.Insert(0, instruction1);
-										}
-
-										endNode1.AsmInstructions.RemoveAt(endNode1InstructionCount - 1);
-									}
+									MoveReturnPopsToEndNode();
 								}
 								else
 								{
@@ -1035,6 +1019,54 @@ namespace Disassembler
 					}
 					#endregion
 				}
+			}
+		}
+
+		/// <summary>
+		/// True when every block that returns ends by popping what <paramref name="push"/> pushed.
+		/// A function that pops it earlier, ahead of a jump into an epilogue it shares with other
+		/// functions, doesn't, and then the push and its pops have to stay in the body.
+		/// </summary>
+		private bool EveryReturnPops(CPUInstruction push)
+		{
+			for (int i = 0; i < this.endNode.ReferenceNodes.Count; i++)
+			{
+				List<CPUInstruction> instructions = this.endNode.ReferenceNodes[i].Value.AsmInstructions;
+
+				if (instructions.Count == 0)
+				{
+					return false;
+				}
+
+				CPUInstruction pop = instructions[instructions.Count - 1];
+
+				if (pop.InstructionType != CPUInstructionEnum.POP ||
+					push.Parameters.Count != pop.Parameters.Count ||
+					!push.Parameters[0].Equals(pop.Parameters[0]))
+				{
+					return false;
+				}
+			}
+
+			return true;
+		}
+
+		/// <summary>
+		/// Moves the pop that ends every returning block into the end block, once
+		/// <see cref="EveryReturnPops"/> has confirmed they are all there
+		/// </summary>
+		private void MoveReturnPopsToEndNode()
+		{
+			for (int i = 0; i < this.endNode.ReferenceNodes.Count; i++)
+			{
+				List<CPUInstruction> instructions = this.endNode.ReferenceNodes[i].Value.AsmInstructions;
+
+				if (i == 0)
+				{
+					this.endNode.AsmInstructions.Insert(0, instructions[instructions.Count - 1]);
+				}
+
+				instructions.RemoveAt(instructions.Count - 1);
 			}
 		}
 

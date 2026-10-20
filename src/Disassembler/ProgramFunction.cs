@@ -109,8 +109,12 @@ namespace Disassembler
 							}
 							else if (parameter.Type == CPUParameterTypeEnum.MemoryAddress && parameter.Value == 6)
 							{
-								throw new Exception($"Relative jump to {parameter.ToString()} in function {this.parentSegment.Name}.{this.Name} " +
+								// a jump through a single word variable, not through a table, so not
+								// a switch: a dispatch vector filled in at run time
+								Console.WriteLine($"Jump through variable {parameter.ToString()} in function {this.parentSegment.Name}.{this.Name} " +
 									$"(Instruction at 0x{instruction.LinearAddress:x})");
+								// treat this as end of a instruction stream
+								bEnd = true;
 							}
 							else if (parameter.Type == CPUParameterTypeEnum.MemoryAddress)
 							{
@@ -888,7 +892,10 @@ namespace Disassembler
 				{
 					case CPUInstructionEnum.NOP:
 					case CPUInstructionEnum.WAIT:
-						if (!instruction.Label)
+						// the flow graph starts from the instruction at the entry point, so keep
+						// it even when it has been folded away, as the PUSH CS of a PUSH CS,
+						// CALL pair at the very start of a function is
+						if (!instruction.Label && instruction.LinearAddress != this.fnEntryPoint)
 						{
 							this.asmInstructions.RemoveAt(i);
 							i--;
@@ -2352,6 +2359,11 @@ namespace Disassembler
 							{
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}// Probably a switch statement - near jump to register value");
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.JmpUInt16({parameter.ToCSTextMZ(instruction.OperandSize)});");
+							}
+							else if (parameter.Type == CPUParameterTypeEnum.MemoryAddress && parameter.Value == 6)
+							{
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}// near jump through a dispatch variable, filled in at run time");
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.JmpUInt16(this.oCPU.ReadUInt16({parameter.GetSegmentTextMZ()}, {parameter.ToCSTextMZ(instruction.OperandSize)}));");
 							}
 							else
 							{
