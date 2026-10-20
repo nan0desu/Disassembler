@@ -228,6 +228,14 @@ internal class Program
 				function.ReturnValue = new ILVariable(function, ILVariableScopeEnum.LocalParameter, mainProgram.IntValueType, 0, 10);
 			}
 
+			// code nothing calls directly, only through a pointer in DGROUP: the FAB unpackers,
+			// the graphics dispatch vectors, the C runtime's hooks
+			Console.WriteLine("Code pointer targets: {0} functions", mainProgram.DisassembleCodePointerTargets());
+
+			// pointer targets the scan can't see: F0_2047_0106 points the five sound driver
+			// vectors at this stub (xor ax, ax; retf) through [DI], when no driver is loaded
+			mainProgram.Disassemble(0, 0x1047, 0x0103, null);
+
 			Console.WriteLine("* Writing code");
 
 			mainProgram.AssignOrdinals();
@@ -241,6 +249,11 @@ internal class Program
 			}
 
 			Console.WriteLine("Main segments: {0}", segmentOffsets.Length);
+
+			if (runnable)
+			{
+				mainProgram.WriteDispatchCS(codePath);
+			}
 		}
 		catch (Exception ex)
 		{

@@ -507,6 +507,32 @@ namespace Disassembler
 
 									stream.Seek(fnAddress, SeekOrigin.Begin);
 								}
+								else if (TryBXSwitch(iPos, exeData, fnSegment, out uiCount, out usSwitchOffset))
+								{
+									// The general shape: JMP [CS:table + BX] with BX = 2 * index, the index
+									// bounded by a CMP/JA before it. Switch on BX itself, so whatever the code
+									// did to get the index there (SUB, SHL, ADD, XCHG, MOV) still runs as is.
+									instruction1 = this.asmInstructions[iPos];
+									instruction1.InstructionType = CPUInstructionEnum.SWITCH;
+									instruction1.OperandSize = CPUParameterSizeEnum.UInt16;
+									instruction1.Parameters.Clear();
+									instruction1.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Register, CPUParameterSizeEnum.UInt16, (uint)CPURegisterEnum.BX));
+
+									stream.Seek(fnSegment + usSwitchOffset, SeekOrigin.Begin);
+
+									for (int i = 0; i <= uiCount; i++)
+									{
+										ushort usWord = ReadWord(stream);
+										aJumps.Add((uint)(fnSegment + usWord));
+										instruction1.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Immediate,
+											CPUParameterSizeEnum.UInt16, (uint)(i * 2), usWord));
+									}
+
+									fnAddress = aJumps[aJumps.Count - 1];
+									aJumps.RemoveAt(aJumps.Count - 1);
+
+									stream.Seek(fnAddress, SeekOrigin.Begin);
+								}
 								else
 								{
 									instruction1 = this.asmInstructions[iPos];
@@ -1568,6 +1594,98 @@ namespace Disassembler
 			return CPUJumpConditionEnum.Undefined;
 		}
 
+		/// <summary>
+		/// Recognizes a jump table indexed by BX: JMP word [CS:table + BX], where BX holds twice a
+		/// case index that a CMP reg, N / JA (or JBE) a few instructions earlier keeps within 0..N.
+		/// The compiler gets the index there in several ways (SUB to rebase it, SHL or ADD to
+		/// double it, XCHG or MOV into BX), so only the bound and the doubling are looked for.
+		/// </summary>
+		private bool TryBXSwitch(int jumpPosition, byte[] data, uint fnSegment, out uint lastIndex, out ushort tableOffset)
+		{
+			lastIndex = 0;
+			tableOffset = 0;
+
+			CPUInstruction jump = this.asmInstructions[jumpPosition];
+
+			if (jump.InstructionType != CPUInstructionEnum.JMP || jump.Parameters.Count != 1)
+				return false;
+
+			CPUParameter target = jump.Parameters[0];
+
+			// [disp8 + BX] or [disp16 + BX]
+			if (target.Type != CPUParameterTypeEnum.MemoryAddress || (target.Value != 15 && target.Value != 23) ||
+				target.DataSegment != CPUSegmentRegisterEnum.CS || target.Size != CPUParameterSizeEnum.UInt16)
+				return false;
+
+			bool doubled = false;
+			bool bounded = false;
+
+			for (int i = jumpPosition - 1; i >= 0 && i >= jumpPosition - 8; i--)
+			{
+				CPUInstruction instruction = this.asmInstructions[i];
+
+				if (!doubled &&
+					((instruction.InstructionType == CPUInstructionEnum.SHL && instruction.Parameters.Count == 2 &&
+					instruction.Parameters[0].Type == CPUParameterTypeEnum.Register &&
+					instruction.Parameters[1].Type == CPUParameterTypeEnum.Immediate && instruction.Parameters[1].Value == 1) ||
+					(instruction.InstructionType == CPUInstructionEnum.ADD && instruction.Parameters.Count == 2 &&
+					instruction.Parameters[0].Type == CPUParameterTypeEnum.Register &&
+					instruction.Parameters[1].Type == CPUParameterTypeEnum.Register &&
+					instruction.Parameters[0].Value == instruction.Parameters[1].Value)))
+				{
+					doubled = true;
+				}
+				else if (instruction.InstructionType == CPUInstructionEnum.Jcc && i > 0 &&
+					(instruction.Parameters[0].Value == (uint)CPUJumpConditionEnum.A ||
+					instruction.Parameters[0].Value == (uint)CPUJumpConditionEnum.BE))
+				{
+					CPUInstruction compare = this.asmInstructions[i - 1];
+
+					if (compare.InstructionType == CPUInstructionEnum.CMP && compare.Parameters.Count == 2 &&
+						compare.Parameters[0].Type == CPUParameterTypeEnum.Register &&
+						compare.Parameters[1].Type == CPUParameterTypeEnum.Immediate)
+					{
+						lastIndex = compare.Parameters[1].Value;
+						bounded = true;
+					}
+					break;
+				}
+			}
+
+			if (!doubled || lastIndex > 0xff)
+				return false;
+
+			tableOffset = (ushort)target.Displacement;
+
+			if (!bounded)
+			{
+				// No CMP bound, the index comes from a computation (the printf state machine
+				// derives it with XLAT). Take entries while they point into this function's
+				// neighbourhood; the first one that doesn't is code or data after the table.
+				int table = (int)fnSegment + tableOffset;
+				int count = 0;
+
+				while (count < 64 && table + count * 2 + 1 < data.Length)
+				{
+					ushort entry = (ushort)(data[table + count * 2] | (data[table + count * 2 + 1] << 8));
+
+					if (entry < this.fnOffset || entry > jump.Offset + 0x1000)
+						break;
+
+					count++;
+				}
+
+				if (count == 0)
+					return false;
+
+				lastIndex = (uint)(count - 1);
+				Console.WriteLine($"Switch without a bound at {target.ToString()} in function {this.parentSegment.Name}.{this.Name}, " +
+					$"taking {count} table entries (instruction at 0x{jump.LinearAddress:x})");
+			}
+
+			return true;
+		}
+
 		public CPUInstruction? GetInstructionByOffset(ushort offset)
 		{
 			for (int i = 0; i < this.asmInstructions.Count; i++)
@@ -1778,13 +1896,80 @@ namespace Disassembler
 		{
 			if (this.parentSegment.ParentProgram.Runnable)
 			{
+				ApplyRuntimeRelocations();
+
 				StringWriter text = new();
 				WriteAsmCSText(text, tabLevel, verbosity);
-				writer.Write(ToVCPUNames(text.ToString()));
+
+				// CS is never loaded by the generated code, the segment a function runs in is a
+				// constant: the resident load address, or the made up one of an overlay segment
+				ushort runtimeSegment = this.parentSegment.ParentProgram.RuntimeSegment(this.parentSegment);
+				writer.Write(ToVCPUNames(text.ToString()).Replace("this.oCPU.CS.UInt16", $"0x{runtimeSegment:x4}"));
 			}
 			else
 			{
 				WriteAsmCSText(writer, tabLevel, verbosity);
+			}
+		}
+
+		private bool runtimeRelocationsApplied = false;
+
+		/// <summary>
+		/// Adds the load segment to every immediate that is a relocated segment word, as DOS and
+		/// the overlay manager would. Every relocation in VICEROY.EXE, resident or overlay, names
+		/// a resident segment or DGROUP. Far calls and jumps are left alone, their segment has
+		/// already been turned into a method.
+		/// </summary>
+		private void ApplyRuntimeRelocations()
+		{
+			if (this.runtimeRelocationsApplied)
+				return;
+
+			this.runtimeRelocationsApplied = true;
+
+			HashSet<uint> relocated = this.parentSegment.ParentProgram.GetRelocatedWords(this.parentSegment.CPUOverlay);
+
+			foreach (CPUInstruction instruction in this.asmInstructions)
+			{
+				if (instruction.InstructionType == CPUInstructionEnum.CALLF ||
+					instruction.InstructionType == CPUInstructionEnum.JMPF ||
+					instruction.InstructionType == CPUInstructionEnum.CallOverlay ||
+					instruction.Bytes.Count < 3)
+					continue;
+
+				bool hasRelocation = false;
+
+				for (uint address = instruction.LinearAddress; address + 1 < instruction.LinearAddress + instruction.Bytes.Count; address++)
+				{
+					if (relocated.Contains(address))
+					{
+						hasRelocation = true;
+						break;
+					}
+				}
+
+				if (!hasRelocation)
+					continue;
+
+				CPUParameter? segmentWord = null;
+
+				foreach (CPUParameter parameter in instruction.Parameters)
+				{
+					if (parameter.Type == CPUParameterTypeEnum.Immediate && parameter.Size == CPUParameterSizeEnum.UInt16)
+					{
+						segmentWord = parameter;
+					}
+				}
+
+				if (segmentWord != null)
+				{
+					segmentWord.Value = (ushort)(segmentWord.Value + MainProgram.LoadSegment);
+				}
+				else
+				{
+					Console.WriteLine($"Relocation without an immediate operand in {this.parentSegment.Name}.{this.Name} " +
+						$"at offset 0x{instruction.Offset:x4}: {instruction}");
+				}
 			}
 		}
 
@@ -1838,6 +2023,37 @@ namespace Disassembler
 			if (size > 0)
 			{
 				writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.SP.UInt16 = (ushort)(this.oCPU.SP.UInt16 + 0x{size:x});");
+			}
+		}
+
+		/// <summary>
+		/// A call or jump whose target is only known at run time goes through the generated
+		/// dispatch table, which maps segment:offset to the method. A jump is a tail transfer:
+		/// the target returns to our caller, so this function returns right after it.
+		/// </summary>
+		private void WriteIndirectTransfer(TextWriter writer, int tabLevel, CPUInstruction instruction, CPUParameter parameter, bool far, bool jump)
+		{
+			string target;
+
+			if (parameter.Type == CPUParameterTypeEnum.Register)
+			{
+				target = parameter.ToSourceCSTextMZ(CPUParameterSizeEnum.UInt16);
+			}
+			else
+			{
+				CPUParameterSizeEnum size = far ? CPUParameterSizeEnum.UInt32 : CPUParameterSizeEnum.UInt16;
+				target = $"this.oCPU.Read{size}({parameter.GetSegmentTextMZ()}, {parameter.ToCSTextMZ(instruction.OperandSize)})";
+			}
+
+			string method = (jump ? "Jump" : "Call") + (far ? "Far" : "Near");
+			string arguments = far ? target : $"0x{this.parentSegment.ParentProgram.RuntimeSegment(this.parentSegment):x4}, {target}";
+
+			writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oParent.Dispatch.{method}({arguments});");
+
+			if (jump)
+			{
+				writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.Log.ExitBlock(\"'{this.Name}'\");");
+				writer.WriteLine($"{GetTabs(tabLevel + 1)}return;");
 			}
 		}
 
@@ -2515,17 +2731,38 @@ namespace Disassembler
 							else if (parameter.Type == CPUParameterTypeEnum.Register)
 							{
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}// Probably a switch statement - near jump to register value");
-								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.JmpUInt16({parameter.ToCSTextMZ(instruction.OperandSize)});");
+								if (runnable)
+								{
+									WriteIndirectTransfer(writer, tabLevel, instruction, parameter, false, true);
+								}
+								else
+								{
+									writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.JmpUInt16({parameter.ToCSTextMZ(instruction.OperandSize)});");
+								}
 							}
 							else if (parameter.Type == CPUParameterTypeEnum.MemoryAddress && parameter.Value == 6)
 							{
-								writer.WriteLine($"{GetTabs(tabLevel + 1)}// near jump through a dispatch variable, filled in at run time");
-								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.JmpUInt16(this.oCPU.ReadUInt16({parameter.GetSegmentTextMZ()}, {parameter.ToCSTextMZ(instruction.OperandSize)}));");
+								if (runnable)
+								{
+									WriteIndirectTransfer(writer, tabLevel, instruction, parameter, false, true);
+								}
+								else
+								{
+									writer.WriteLine($"{GetTabs(tabLevel + 1)}// near jump through a dispatch variable, filled in at run time");
+									writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.JmpUInt16(this.oCPU.ReadUInt16({parameter.GetSegmentTextMZ()}, {parameter.ToCSTextMZ(instruction.OperandSize)}));");
+								}
 							}
 							else
 							{
-								writer.WriteLine($"{GetTabs(tabLevel + 1)}// Probably a switch statement - near jump to indirect address");
-								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.JmpUInt16(this.oCPU.ReadUInt16({parameter.GetSegmentTextMZ()}, {parameter.ToCSTextMZ(instruction.OperandSize)}));");
+								if (runnable)
+								{
+									WriteIndirectTransfer(writer, tabLevel, instruction, parameter, false, true);
+								}
+								else
+								{
+									writer.WriteLine($"{GetTabs(tabLevel + 1)}// Probably a switch statement - near jump to indirect address");
+									writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.JmpUInt16(this.oCPU.ReadUInt16({parameter.GetSegmentTextMZ()}, {parameter.ToCSTextMZ(instruction.OperandSize)}));");
+								}
 							}
 							break;
 
@@ -2567,7 +2804,14 @@ namespace Disassembler
 							}
 							else
 							{
-								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.JmpUInt32(this.oCPU.ReadUInt32({parameter.GetSegmentTextMZ()}, {parameter.ToCSTextMZ(instruction.OperandSize)}));");
+								if (runnable)
+								{
+									WriteIndirectTransfer(writer, tabLevel, instruction, parameter, true, true);
+								}
+								else
+								{
+									writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.JmpUInt32(this.oCPU.ReadUInt32({parameter.GetSegmentTextMZ()}, {parameter.ToCSTextMZ(instruction.OperandSize)}));");
+								}
 							}
 							break;
 
@@ -2589,7 +2833,14 @@ namespace Disassembler
 
 							if (parameter.Type != CPUParameterTypeEnum.Immediate)
 							{
-								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.CallUInt16(this.oCPU.ReadUInt16({parameter.GetSegmentTextMZ()}, {parameter.ToCSTextMZ(instruction.OperandSize)}));");
+								if (runnable)
+								{
+									WriteIndirectTransfer(writer, tabLevel, instruction, parameter, false, false);
+								}
+								else
+								{
+									writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.CallUInt16(this.oCPU.ReadUInt16({parameter.GetSegmentTextMZ()}, {parameter.ToCSTextMZ(instruction.OperandSize)}));");
+								}
 							}
 							else
 							{
@@ -2729,7 +2980,14 @@ namespace Disassembler
 							}
 							else
 							{
-								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.CallUInt32(this.oCPU.ReadUInt32({parameter.GetSegmentTextMZ()}, {parameter.ToCSTextMZ(instruction.OperandSize)}));");
+								if (runnable)
+								{
+									WriteIndirectTransfer(writer, tabLevel, instruction, parameter, true, false);
+								}
+								else
+								{
+									writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.CallUInt32(this.oCPU.ReadUInt32({parameter.GetSegmentTextMZ()}, {parameter.ToCSTextMZ(instruction.OperandSize)}));");
+								}
 							}
 
 							if (!runnable && verbosity > 0)
