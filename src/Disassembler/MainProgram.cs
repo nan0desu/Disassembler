@@ -62,6 +62,9 @@ namespace Disassembler
 			set => this.runnable = value;
 		}
 
+		/// <summary>Linear run-time addresses right after every call the runnable code makes</summary>
+		public SortedSet<uint> ReturnAddresses { get; } = new();
+
 		/// <summary>Namespace of the generated classes</summary>
 		public string Namespace { get; set; } = "OpenCiv1";
 
@@ -234,19 +237,37 @@ namespace Disassembler
 			writer.WriteLine("\t\tpublic void CallFar(uint address) => Invoke((ushort)(address >> 16), (ushort)address);");
 			writer.WriteLine();
 			writer.WriteLine("\t\t// a jump is a tail call, the caller returns right after it");
-			writer.WriteLine("\t\tpublic void JumpNear(ushort segment, ushort offset) => Invoke(segment, offset);");
+			writer.WriteLine("\t\tpublic void JumpNear(ushort segment, ushort offset) => Invoke(segment, offset, true);");
 			writer.WriteLine();
-			writer.WriteLine("\t\tpublic void JumpFar(uint address) => Invoke((ushort)(address >> 16), (ushort)address);");
+			writer.WriteLine("\t\tpublic void JumpFar(uint address) => Invoke((ushort)(address >> 16), (ushort)address, true);");
 			writer.WriteLine();
-			writer.WriteLine("\t\tprivate void Invoke(ushort segment, ushort offset)");
+			writer.WriteLine("\t\t/// <summary>");
+			writer.WriteLine("\t\t/// A jump to the point after a call returns to that caller: code that pops its return address");
+			writer.WriteLine("\t\t/// and jumps to it (the C runtime's _setargv does). The generated code returns right after");
+			writer.WriteLine("\t\t/// the jump, which continues the caller there.");
+			writer.WriteLine("\t\t/// </summary>");
+			writer.WriteLine("\t\tprivate void Invoke(ushort segment, ushort offset, bool jump = false)");
 			writer.WriteLine("\t\t{");
 			writer.WriteLine("\t\t\tuint address = ((uint)segment << 4) + offset;");
 			writer.WriteLine();
 			writer.WriteLine("\t\t\tif (this.Native.TryGetValue(address, out var action))");
 			writer.WriteLine("\t\t\t\taction();");
-			writer.WriteLine("\t\t\telse if (!Call(address))");
+			writer.WriteLine("\t\t\telse if (!Call(address) && !(jump && ReturnAddresses.Contains(address)))");
 			writer.WriteLine("\t\t\t\tthrow new Exception($\"No function at {segment:x4}:{offset:x4} (linear 0x{address:x5})\");");
 			writer.WriteLine("\t\t}");
+			writer.WriteLine();
+			writer.WriteLine($"\t\t// {this.ReturnAddresses.Count} call sites");
+			writer.WriteLine("\t\tprivate static readonly HashSet<uint> ReturnAddresses = new(new uint[]");
+			writer.WriteLine("\t\t{");
+
+			uint[] returnAddresses = this.ReturnAddresses.ToArray();
+
+			for (int i = 0; i < returnAddresses.Length; i += 8)
+			{
+				writer.WriteLine("\t\t\t" + string.Join(", ", returnAddresses.Skip(i).Take(8).Select(address => $"0x{address:x5}")) + ",");
+			}
+
+			writer.WriteLine("\t\t});");
 			writer.WriteLine();
 			writer.WriteLine($"\t\t// {entries.Count - thunks} functions, {thunks} thunks");
 			writer.WriteLine("\t\tprivate bool Call(uint address)");

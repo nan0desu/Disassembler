@@ -230,7 +230,11 @@ namespace Disassembler
 									(ushort)((byte1 & 0xff) | ((byte2 & 0xff) << 8))));
 								fnAddress += 3;
 							}
-							else if (this.asmInstructions.Count > 1)
+							// INT 21h with AH 00h or 4Ch ends the program. Only INT 21h: AH 00h is also
+							// read key for INT 16h and set video mode for INT 10h
+							else if (instruction.Parameters[0].Type == CPUParameterTypeEnum.Immediate &&
+								instruction.Parameters[0].Value == 0x21 &&
+								this.asmInstructions.Count > 1)
 							{
 								instruction1 = this.asmInstructions[this.asmInstructions.Count - 2];
 
@@ -635,7 +639,20 @@ namespace Disassembler
 										break;
 								}
 
-								if (address != newAddress)
+								bool conditional = instruction.InstructionType != CPUInstructionEnum.JMP &&
+									instruction.InstructionType != CPUInstructionEnum.JMPF;
+
+								if (address != newAddress && conditional)
+								{
+									// JCXZ and LOOPx keep their condition, only the target moves, and they
+									// can't reach another segment
+									if (segment == newSegment)
+									{
+										instruction.Parameters[0] = new CPUParameter(CPUParameterTypeEnum.Immediate,
+											newAddress - MainProgram.ToLinearAddress(newSegment, 0));
+									}
+								}
+								else if (address != newAddress)
 								{
 									if (segment != newSegment)
 									{
@@ -840,8 +857,10 @@ namespace Disassembler
 				uint sourceReg2 = 0;
 				uint destinationReg = 0;
 
-				// all xors and subs with same source and destination are 0
-				if (i + 1 < this.asmInstructions.Count &&
+				// all xors and subs with same source and destination are 0. Not in runnable code:
+				// they also clear CF and set ZF, which any later instruction may test
+				if (!this.parentSegment.ParentProgram.Runnable &&
+					i + 1 < this.asmInstructions.Count &&
 					((instruction1 = this.asmInstructions[i]).InstructionType == CPUInstructionEnum.XOR ||
 					instruction1.InstructionType == CPUInstructionEnum.SUB) &&
 					instruction1.Parameters.Count == 2 &&
@@ -891,7 +910,9 @@ namespace Disassembler
 					this.asmInstructions[i + 1].InstructionType = CPUInstructionEnum.NOP;
 					this.asmInstructions[i + 2].InstructionType = CPUInstructionEnum.NOP;
 				}
-				if (i + 1 < this.asmInstructions.Count &&
+				// Not in runnable code: the register keeps the address, and code after the push may use it
+				if (!this.parentSegment.ParentProgram.Runnable &&
+					i + 1 < this.asmInstructions.Count &&
 					(instruction1 = this.asmInstructions[i]).InstructionType == CPUInstructionEnum.LEA &&
 					instruction1.OperandSize == CPUParameterSizeEnum.UInt16 &&
 					instruction1.Parameters.Count == 2 &&
@@ -2005,6 +2026,9 @@ namespace Disassembler
 				writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PUSHUInt16(this.oCPU.CS.UInt16); // return segment");
 			}
 			writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PUSHUInt16(0x{instruction.Offset + instruction.Bytes.Count:x4}); // return offset");
+
+			MainProgram program = this.parentSegment.ParentProgram;
+			program.ReturnAddresses.Add(((uint)program.RuntimeSegment(this.parentSegment) << 4) + instruction.Offset + (uint)instruction.Bytes.Count);
 		}
 
 		/// <summary>
@@ -2372,20 +2396,18 @@ namespace Disassembler
 							}
 							break;
 
+						// The segment word is read first: the destination register can be part of the
+						// address (LDS BX, [BX+0Eh] walks a linked list), and both words come from
+						// the address as it was before the instruction
 						case CPUInstructionEnum.LDS:
-							parameter = instruction.Parameters[1];
-							writer.WriteLine($"{GetTabs(tabLevel + 1)}// LDS");
-							writer.WriteLine($"{GetTabs(tabLevel + 1)}{instruction.Parameters[0].ToDestinationCSTextMZ(instruction.OperandSize, parameter.ToSourceCSTextMZ(instruction.OperandSize))}");
-							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.DS.{instruction.OperandSize.ToString()} = this.oCPU.Read{instruction.OperandSize.ToString()}" +
-								$"({parameter.GetSegmentTextMZ()}, (ushort)({parameter.ToCSTextMZ(instruction.OperandSize)} + 2));");
-							break;
-
 						case CPUInstructionEnum.LES:
 							parameter = instruction.Parameters[1];
-							writer.WriteLine($"{GetTabs(tabLevel + 1)}// LES");
-							writer.WriteLine($"{GetTabs(tabLevel + 1)}{instruction.Parameters[0].ToDestinationCSTextMZ(instruction.OperandSize, parameter.ToSourceCSTextMZ(instruction.OperandSize))}");
-							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.ES.{instruction.OperandSize.ToString()} = this.oCPU.Read{instruction.OperandSize.ToString()}" +
+							string segmentRegister = instruction.InstructionType == CPUInstructionEnum.LDS ? "DS" : "ES";
+							writer.WriteLine($"{GetTabs(tabLevel + 1)}// {instruction.InstructionType}");
+							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.Temp.{instruction.OperandSize.ToString()} = this.oCPU.Read{instruction.OperandSize.ToString()}" +
 								$"({parameter.GetSegmentTextMZ()}, (ushort)({parameter.ToCSTextMZ(instruction.OperandSize)} + 2));");
+							writer.WriteLine($"{GetTabs(tabLevel + 1)}{instruction.Parameters[0].ToDestinationCSTextMZ(instruction.OperandSize, parameter.ToSourceCSTextMZ(instruction.OperandSize))}");
+							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.{segmentRegister}.{instruction.OperandSize.ToString()} = this.oCPU.Temp.{instruction.OperandSize.ToString()};");
 							break;
 
 						case CPUInstructionEnum.LEA:

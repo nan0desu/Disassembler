@@ -249,6 +249,9 @@ internal class Program
 			mainProgram.Disassemble(0, 0x0a0a, 0x007a, null);
 			mainProgram.Disassemble(0, 0x0a58, 0x0207, null);
 
+			// the C runtime's terminator table, DS:2b32..2b36, walked by exit() through F0_1d1d_03bd
+			mainProgram.Disassemble(0, 0x0d1d, 0x190a, null);
+
 			Console.WriteLine("* Writing code");
 
 			mainProgram.AssignOrdinals();
