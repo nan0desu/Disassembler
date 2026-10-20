@@ -173,6 +173,22 @@ namespace Disassembler
 					return this.name;
 				}
 
+				if (this.parentProgram.AddressNames)
+				{
+					if (this.CPUOverlay != 0 && this.CPUSegment != 0)
+					{
+						return $"Overlay_{this.CPUOverlay}_{this.CPUSegment:x4}";
+					}
+					else if (this.CPUOverlay != 0)
+					{
+						return $"Overlay_{this.CPUOverlay}";
+					}
+					else
+					{
+						return $"Segment_{this.CPUSegment + MainProgram.LoadSegment:x4}";
+					}
+				}
+
 				if (this.ordinal == -1)
 				{
 					if (MainProgram.ToCPUOverlay(this.segment) != 0)

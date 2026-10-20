@@ -7,6 +7,9 @@ namespace Disassembler
 {
 	public class MainProgram
 	{
+		// the segment the executable is loaded at, as in OpenCiv1
+		public const ushort LoadSegment = 0x1000;
+
 		// base types
 		private ILValueType voidValueType = ILValueType.Void;
 		private ILValueType charValueType = new("char", ILBaseValueTypeEnum.Int8);
@@ -24,6 +27,7 @@ namespace Disassembler
 		private uint defaultDS = 0;
 		private BDictionary<string, APIFunctionDefinition> apiFunctions = new();
 		private BDictionary<string, ILValueType> customValueTypes = new();
+		private bool addressNames = false;
 
 		public MainProgram(MZExecutable executable, List<ModuleMatch> matches, int version)
 		{
@@ -33,6 +37,16 @@ namespace Disassembler
 
 			//MainProgramFunction function = new MainProgramFunction(this, MainProgramFunctionCallTypeEnum.Cdecl, "DivisionByZero", 
 			//	new List<Variable>(), CPUParameterSizeEnum.Undefined, 0, 0, 0);
+		}
+
+		/// <summary>
+		/// Name segments and functions by address, the OpenCiv1 way (Segment_11a8, Overlay_18,
+		/// F0_11a8_0268), instead of by ordinal.
+		/// </summary>
+		public bool AddressNames
+		{
+			get => this.addressNames;
+			set => this.addressNames = value;
 		}
 
 		public ProgramFunction? FindFunction(ushort overlay, ushort segment, ushort offset)

@@ -173,6 +173,7 @@ internal class Program
 			List<ModuleMatch> matches = [];
 			MainProgram mainProgram = new(mainEXE, matches, 0);
 			mainProgram.DefaultDS = startup.DataSegment;
+			mainProgram.AddressNames = true;
 
 			Console.WriteLine("* Disassembling");
 

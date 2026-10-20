@@ -2938,7 +2938,18 @@ namespace Disassembler
 			{
 				if (string.IsNullOrEmpty(this.name))
 				{
-					if (this.ordinal >= 0)
+					if (this.parentSegment.ParentProgram.AddressNames)
+					{
+						ushort segment = this.parentSegment.CPUSegment;
+
+						if (this.parentSegment.CPUOverlay == 0)
+						{
+							segment += MainProgram.LoadSegment;
+						}
+
+						return $"F{this.parentSegment.CPUOverlay}_{segment:x4}_{this.fnOffset:x4}";
+					}
+					else if (this.ordinal >= 0)
 					{
 						return $"Fn{this.ordinal}";
 					}
