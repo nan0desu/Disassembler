@@ -140,6 +140,24 @@ namespace Disassembler
 									// treat this as end of a instruction stream
 									bEnd = true;
 								}
+								else if (this.parentSegment.CPUOverlay > 0)
+								{
+									// An overlay's segments aren't known at link time, so a far jump
+									// out of overlay code always lands in the resident image, never
+									// in this overlay's data. It is a tail call: the target returns
+									// straight to our caller. Express it as a far call followed by a
+									// far return, which also lets a jump into a thunk be resolved
+									// like any other call through one.
+									instruction.InstructionType = CPUInstructionEnum.CALLF;
+
+									CPUInstruction tailReturn = new CPUInstruction(instruction.Segment, (ushort)(instruction.Offset + 1),
+										CPUInstructionEnum.RETF, instruction.OperandSize);
+
+									this.asmInstructions.Add(tailReturn);
+									this.functionOptions |= ProgramFunctionOptionsEnum.Far;
+									this.functionOptions |= ProgramFunctionOptionsEnum.Return;
+									bEnd = true;
+								}
 								else
 								{
 									stream.Seek(fnAddress, SeekOrigin.Begin);
