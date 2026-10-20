@@ -195,7 +195,11 @@ namespace Disassembler
 							currentNode.AsmInstructions.Add(instruction);
 							break;
 
+						case CPUInstructionEnum.INS:
 						case CPUInstructionEnum.OUTS:
+						case CPUInstructionEnum.XLAT:
+						case CPUInstructionEnum.LAHF:
+						case CPUInstructionEnum.SAHF:
 							currentNode.AsmInstructions.Add(instruction);
 							break;
 
@@ -452,6 +456,8 @@ namespace Disassembler
 							break;
 
 						case CPUInstructionEnum.LOOP:
+						case CPUInstructionEnum.LOOPE:
+						case CPUInstructionEnum.LOOPNE:
 							if (currentNode.LinearAddress == instruction.LinearAddress)
 							{
 								currentNode.NodeType = FlowGraphNodeTypeEnum.Block;
@@ -3007,6 +3013,13 @@ namespace Disassembler
 					required |= CPUSegmentRegisterToLocal(instruction.DefaultDataSegment);
 					break;
 
+				case CPUInstructionEnum.INS:
+					required |= FlowGraphLocalEnum.DFlag;
+					required |= FlowGraphLocalEnum.DI;
+					required |= FlowGraphLocalEnum.ES;
+					required |= FlowGraphLocalEnum.DX;
+					break;
+
 				case CPUInstructionEnum.OUTS:
 					required |= FlowGraphLocalEnum.DFlag;
 					required |= FlowGraphLocalEnum.SI;
@@ -3128,7 +3141,22 @@ namespace Disassembler
 					break;
 
 				case CPUInstructionEnum.LOOP:
+				case CPUInstructionEnum.LOOPE:
+				case CPUInstructionEnum.LOOPNE:
 					required |= FlowGraphLocalEnum.CX;
+					break;
+
+				case CPUInstructionEnum.XLAT:
+					required |= FlowGraphLocalEnum.AL;
+					required |= FlowGraphLocalEnum.BX;
+					required |= CPUSegmentRegisterToLocal(instruction.DefaultDataSegment);
+					break;
+
+				case CPUInstructionEnum.SAHF:
+					required |= FlowGraphLocalEnum.AH;
+					break;
+
+				case CPUInstructionEnum.LAHF:
 					break;
 
 				case CPUInstructionEnum.JMP:
@@ -3277,6 +3305,7 @@ namespace Disassembler
 				// CMPS and SCAS only set flags, and flags are not tracked as defined locals here,
 				// same as the plain CMP and TEST above
 				case CPUInstructionEnum.CMPS:
+				case CPUInstructionEnum.INS:
 				case CPUInstructionEnum.MOVS:
 				case CPUInstructionEnum.OUTS:
 				case CPUInstructionEnum.SCAS:
@@ -3379,6 +3408,19 @@ namespace Disassembler
 					break;
 
 				case CPUInstructionEnum.LOOP:
+				case CPUInstructionEnum.LOOPE:
+				case CPUInstructionEnum.LOOPNE:
+					break;
+
+				case CPUInstructionEnum.XLAT:
+					defined |= FlowGraphLocalEnum.AL;
+					break;
+
+				case CPUInstructionEnum.LAHF:
+					defined |= FlowGraphLocalEnum.AH;
+					break;
+
+				case CPUInstructionEnum.SAHF:
 					break;
 
 				case CPUInstructionEnum.JMP:

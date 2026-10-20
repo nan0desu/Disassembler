@@ -69,7 +69,7 @@ namespace Disassembler
 
 				writer.WriteLine("using IRB.VirtualCPU;");
 				writer.WriteLine();
-				writer.WriteLine("namespace OpenCiv1");
+				writer.WriteLine($"namespace {this.parentProgram.Namespace}");
 				writer.WriteLine("{");
 				writer.WriteLine("\tpublic class {0}", className);
 				writer.WriteLine("\t{");
@@ -86,10 +86,10 @@ namespace Disassembler
 					writer.WriteLine($"\t\t// Overlay 0x{this.CPUOverlay:x}");
 				}
 
-				writer.WriteLine("\t\tprivate OpenCiv1Game oParent;");
+				writer.WriteLine($"\t\tprivate {this.parentProgram.ParentClass} oParent;");
 				writer.WriteLine("\t\tprivate VCPU oCPU;");
 				writer.WriteLine();
-				writer.WriteLine("\t\tpublic {0}(OpenCiv1Game parent)", className);
+				writer.WriteLine("\t\tpublic {0}({1} parent)", className, this.parentProgram.ParentClass);
 				writer.WriteLine("\t\t{");
 				writer.WriteLine("\t\t\tthis.oParent = parent;");
 				writer.WriteLine("\t\t\tthis.oCPU = parent.CPU;");

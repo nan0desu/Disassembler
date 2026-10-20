@@ -2594,7 +2594,15 @@ namespace Disassembler
 							break;
 
 						case CPUInstructionEnum.XLAT:
-							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.XLATUInt8({instruction.GetDefaultDataSegmentTextMZ()});");
+							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.AX.LowUInt8 = this.oCPU.XLATUInt8({instruction.GetDefaultDataSegmentTextMZ()});");
+							break;
+
+						case CPUInstructionEnum.LAHF:
+							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.LAHF();");
+							break;
+
+						case CPUInstructionEnum.SAHF:
+							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.SAHF();");
 							break;
 
 						// input and output port instructions
@@ -2628,6 +2636,22 @@ namespace Disassembler
 								writer.WriteLine("{0}{1}({2}, this.oCPU.SI);",
 									instruction.InstructionType.ToString(), instruction.OperandSize.ToString(),
 									instruction.GetDefaultDataSegmentTextMZ());
+							}
+							break;
+
+						// the destination is always ES:DI, there is no segment override
+						case CPUInstructionEnum.INS:
+							writer.Write($"{GetTabs(tabLevel + 1)}this.oCPU.");
+							if (instruction.RepPrefix == CPUInstructionPrefixEnum.REPE || instruction.RepPrefix == CPUInstructionPrefixEnum.REPNE)
+							{
+								writer.WriteLine("{0}_{1}{2}(this.oCPU.ES, this.oCPU.DI, this.oCPU.CX);",
+									instruction.RepPrefix.ToString(),
+									instruction.InstructionType.ToString(), instruction.OperandSize.ToString());
+							}
+							else
+							{
+								writer.WriteLine("{0}{1}(this.oCPU.ES, this.oCPU.DI);",
+									instruction.InstructionType.ToString(), instruction.OperandSize.ToString());
 							}
 							break;
 
@@ -2709,6 +2733,24 @@ namespace Disassembler
 							else
 							{
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}if (this.oCPU.LoopUInt16(this.oCPU.CX)) goto {this.asmInstructions[instructionIndex].LabelName};");
+							}
+							break;
+
+						// CX is decremented whatever ZF is, so the loop call has to come first
+						case CPUInstructionEnum.LOOPE:
+						case CPUInstructionEnum.LOOPNE:
+							uiOffset = (uint)instruction.Parameters[0].Value;
+							instructionIndex = this.GetInstructionPositionByOffset((ushort)uiOffset);
+
+							if (instructionIndex < 0)
+							{
+								throw new Exception($"Can't find instruction in function {this.parentSegment.Name}.{this.Name} at offset 0x{uiOffset:x4}");
+							}
+							else
+							{
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}if (this.oCPU.LoopUInt16(this.oCPU.CX) && " +
+									$"{(instruction.InstructionType == CPUInstructionEnum.LOOPE ? "" : "!")}this.oCPU.Flags.Z) " +
+									$"goto {this.asmInstructions[instructionIndex].LabelName};");
 							}
 							break;
 

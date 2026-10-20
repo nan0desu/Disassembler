@@ -191,6 +191,13 @@ internal class Program
 			mainProgram.AddressNames = true;
 			mainProgram.Runnable = runnable;
 
+			if (runnable)
+			{
+				// runnable output goes straight into OpenColo
+				mainProgram.Namespace = "OpenColo";
+				mainProgram.ParentClass = "OpenColoGame";
+			}
+
 			Console.WriteLine("* Disassembling");
 
 			// An overlaid function is represented in the main image by a 10 byte thunk:
@@ -236,6 +243,12 @@ internal class Program
 			// vectors at this stub (xor ax, ax; retf) through [DI], when no driver is loaded
 			mainProgram.Disassemble(0, 0x1047, 0x0103, null);
 
+			// and the far handlers passed to the outside in registers: the timer callback (water
+			// color cycling, F0_1262_0142 gives it to F0_1a29_021b) and the INT 33h mouse
+			// event handler (ES:DX of function 14h in F0_1a58_008c)
+			mainProgram.Disassemble(0, 0x0a0a, 0x007a, null);
+			mainProgram.Disassemble(0, 0x0a58, 0x0207, null);
+
 			Console.WriteLine("* Writing code");
 
 			mainProgram.AssignOrdinals();
@@ -253,6 +266,7 @@ internal class Program
 			if (runnable)
 			{
 				mainProgram.WriteDispatchCS(codePath);
+				mainProgram.WriteParentCS(codePath);
 			}
 		}
 		catch (Exception ex)

@@ -62,6 +62,12 @@ namespace Disassembler
 			set => this.runnable = value;
 		}
 
+		/// <summary>Namespace of the generated classes</summary>
+		public string Namespace { get; set; } = "OpenCiv1";
+
+		/// <summary>Class the generated classes take as their parent (it holds CPU and the segments)</summary>
+		public string ParentClass { get; set; } = "OpenCiv1Game";
+
 		private readonly Dictionary<int, HashSet<uint>> relocatedWords = new();
 
 		/// <summary>
@@ -128,6 +134,46 @@ namespace Disassembler
 		/// spelling of the same place finds it. Unknown addresses fall back to Native, where the
 		/// host registers its own implementations, and otherwise throw.
 		/// </summary>
+		/// <summary>
+		/// Writes the parent class's half that holds the generated classes: a field for each
+		/// segment and the dispatch table, and CreateSegments() to create them.
+		/// </summary>
+		public void WriteParentCS(string path)
+		{
+			List<string> names = this.segments.Values
+				.Where(segment => segment.Functions.Count > 0)
+				.Select(segment => segment.Name)
+				.ToList();
+			names.Sort(StringComparer.Ordinal);
+
+			using StreamWriter writer = new(Path.Combine(path, $"{this.ParentClass}Segments.cs"));
+
+			writer.WriteLine($"namespace {this.Namespace}");
+			writer.WriteLine("{");
+			writer.WriteLine($"\tpublic partial class {this.ParentClass}");
+			writer.WriteLine("\t{");
+
+			foreach (string name in names)
+			{
+				writer.WriteLine($"\t\tpublic {name} {name};");
+			}
+
+			writer.WriteLine("\t\tpublic CodeDispatch Dispatch;");
+			writer.WriteLine();
+			writer.WriteLine("\t\tprivate void CreateSegments()");
+			writer.WriteLine("\t\t{");
+
+			foreach (string name in names)
+			{
+				writer.WriteLine($"\t\t\tthis.{name} = new {name}(this);");
+			}
+
+			writer.WriteLine("\t\t\tthis.Dispatch = new CodeDispatch(this);");
+			writer.WriteLine("\t\t}");
+			writer.WriteLine("\t}");
+			writer.WriteLine("}");
+		}
+
 		public void WriteDispatchCS(string path)
 		{
 			SortedDictionary<uint, string> entries = new();
@@ -165,7 +211,7 @@ namespace Disassembler
 
 			writer.WriteLine("using IRB.VirtualCPU;");
 			writer.WriteLine();
-			writer.WriteLine("namespace OpenCiv1");
+			writer.WriteLine($"namespace {this.Namespace}");
 			writer.WriteLine("{");
 			writer.WriteLine("\t/// <summary>");
 			writer.WriteLine("\t/// Calls and jumps whose target is only known at run time, by linear address.");
@@ -173,9 +219,9 @@ namespace Disassembler
 			writer.WriteLine("\t/// </summary>");
 			writer.WriteLine("\tpublic class CodeDispatch");
 			writer.WriteLine("\t{");
-			writer.WriteLine("\t\tprivate OpenCiv1Game oParent;");
+			writer.WriteLine($"\t\tprivate {this.ParentClass} oParent;");
 			writer.WriteLine();
-			writer.WriteLine("\t\tpublic CodeDispatch(OpenCiv1Game parent)");
+			writer.WriteLine($"\t\tpublic CodeDispatch({this.ParentClass} parent)");
 			writer.WriteLine("\t\t{");
 			writer.WriteLine("\t\t\tthis.oParent = parent;");
 			writer.WriteLine("\t\t}");
@@ -196,7 +242,7 @@ namespace Disassembler
 			writer.WriteLine("\t\t{");
 			writer.WriteLine("\t\t\tuint address = ((uint)segment << 4) + offset;");
 			writer.WriteLine();
-			writer.WriteLine("\t\t\tif (this.Native.TryGetValue(address, out Action? action))");
+			writer.WriteLine("\t\t\tif (this.Native.TryGetValue(address, out var action))");
 			writer.WriteLine("\t\t\t\taction();");
 			writer.WriteLine("\t\t\telse if (!Call(address))");
 			writer.WriteLine("\t\t\t\tthrow new Exception($\"No function at {segment:x4}:{offset:x4} (linear 0x{address:x5})\");");
