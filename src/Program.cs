@@ -19,7 +19,13 @@ internal class Program
 
 		if (args.Length > 0 && args[0].Equals("colonization", StringComparison.OrdinalIgnoreCase))
 		{
-			ParseColonization(path);
+			ParseColonization(path, false);
+			return;
+		}
+
+		if (args.Length > 0 && args[0].Equals("colonization-runnable", StringComparison.OrdinalIgnoreCase))
+		{
+			ParseColonization(path, true);
 			return;
 		}
 
@@ -108,18 +114,27 @@ internal class Program
 	/// Colonization is built with the same MicroSoft C overlay scheme as Civ1. Its sound drivers
 	/// are standalone MZ overlays with the same 512 byte header and 0000:0010 entry point as the
 	/// Civ1 .CVL drivers, so they go through the same overlay path.
+	///
+	/// The runnable variant writes VICEROY.EXE only, as code for the virtual CPU (see
+	/// MainProgram.Runnable), into its own directory so the readable output stays as it is.
 	/// </summary>
-	private static void ParseColonization(string path)
+	private static void ParseColonization(string path, bool runnable)
 	{
 		string outputPath = path + $"{Path.DirectorySeparatorChar}Output";
-		string codePath = outputPath + $"{Path.DirectorySeparatorChar}Colonization";
+		string codePath = outputPath + $"{Path.DirectorySeparatorChar}{(runnable ? "ColonizationRunnable" : "Colonization")}";
 
 		if (!Directory.Exists(outputPath))
 			Directory.CreateDirectory(outputPath);
 		if (!Directory.Exists(codePath))
 			Directory.CreateDirectory(codePath);
 
-		ProcessColonizationMain(codePath);
+		ProcessColonizationMain(codePath, runnable);
+
+		if (runnable)
+		{
+			Console.WriteLine("Processing finished");
+			return;
+		}
 
 		// Sound Drivers
 		TranslateOverlayToIL(ProcessOverlay("COLONIZE", "ASound", "ASOUND.COL", "ASnd", 0, codePath), "ASound", codePath);
@@ -133,7 +148,7 @@ internal class Program
 	/// <summary>
 	/// Disassembles VICEROY.EXE, the Colonization main executable.
 	/// </summary>
-	private static void ProcessColonizationMain(string codePath)
+	private static void ProcessColonizationMain(string codePath, bool runnable)
 	{
 		Console.WriteLine("* Loading VICEROY.EXE");
 
@@ -174,6 +189,7 @@ internal class Program
 			MainProgram mainProgram = new(mainEXE, matches, 0);
 			mainProgram.DefaultDS = startup.DataSegment;
 			mainProgram.AddressNames = true;
+			mainProgram.Runnable = runnable;
 
 			Console.WriteLine("* Disassembling");
 

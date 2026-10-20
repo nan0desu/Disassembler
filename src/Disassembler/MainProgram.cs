@@ -28,6 +28,7 @@ namespace Disassembler
 		private BDictionary<string, APIFunctionDefinition> apiFunctions = new();
 		private BDictionary<string, ILValueType> customValueTypes = new();
 		private bool addressNames = false;
+		private bool runnable = false;
 
 		public MainProgram(MZExecutable executable, List<ModuleMatch> matches, int version)
 		{
@@ -47,6 +48,18 @@ namespace Disassembler
 		{
 			get => this.addressNames;
 			set => this.addressNames = value;
+		}
+
+		/// <summary>
+		/// Write code that runs on the virtual CPU as is, instead of a readable model of it.
+		/// The stack frame stays in emulated memory ([BP±n] is not turned into C# locals and
+		/// parameters), calls push and returns pop the return address, ENTER and LEAVE are
+		/// expanded, and CPU methods use the VCPU names (ADD_UInt16, not ADDUInt16).
+		/// </summary>
+		public bool Runnable
+		{
+			get => this.runnable;
+			set => this.runnable = value;
 		}
 
 		public ProgramFunction? FindFunction(ushort overlay, ushort segment, ushort offset)

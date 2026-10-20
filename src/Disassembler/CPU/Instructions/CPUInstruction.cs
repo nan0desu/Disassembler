@@ -28,6 +28,12 @@ namespace Disassembler.CPU
 
 		private bool bFPUDestination0 = false;
 
+		// part of a far jump decoded as a tail call (CALLF + synthesized RETF)
+		private bool bTailCall = false;
+
+		// a CallOverlay made from a near CALL, which pushes a 2 byte return address
+		private bool bNearCall = false;
+
 		// this instruction location is referenced by jump
 		private bool bLabel = false;
 		private int labelOrdinal = -1;
@@ -243,6 +249,26 @@ namespace Disassembler.CPU
 		{
 			get { return this.bLabel; }
 			set { this.bLabel = value; }
+		}
+
+		/// <summary>
+		/// The call and the return a far jump was split into. The target returns straight to
+		/// our caller, so neither pushes nor pops a return address of its own.
+		/// </summary>
+		public bool TailCall
+		{
+			get { return this.bTailCall; }
+			set { this.bTailCall = value; }
+		}
+
+		/// <summary>
+		/// A CallOverlay that was a near CALL inside the overlay. It pushes only the offset;
+		/// a CallOverlay through a thunk is a far call.
+		/// </summary>
+		public bool NearCall
+		{
+			get { return this.bNearCall; }
+			set { this.bNearCall = value; }
 		}
 
 		public int LabelOrdinal

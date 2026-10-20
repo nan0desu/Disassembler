@@ -2,6 +2,7 @@
 using Disassembler.Formats.MZ;
 using IRB.Collections.Generic;
 using System.Reflection.Metadata;
+using System.Text.RegularExpressions;
 
 namespace Disassembler
 {
@@ -153,9 +154,11 @@ namespace Disassembler
 									// far return, which also lets a jump into a thunk be resolved
 									// like any other call through one.
 									instruction.InstructionType = CPUInstructionEnum.CALLF;
+									instruction.TailCall = true;
 
 									CPUInstruction tailReturn = new CPUInstruction(instruction.Segment, (ushort)(instruction.Offset + 1),
 										CPUInstructionEnum.RETF, instruction.OperandSize);
+									tailReturn.TailCall = true;
 
 									this.asmInstructions.Add(tailReturn);
 									this.functionOptions |= ProgramFunctionOptionsEnum.Far;
@@ -681,6 +684,7 @@ namespace Disassembler
 						CPUParameter parameter = asmInstruction.Parameters[0];
 
 						asmInstruction.InstructionType = CPUInstructionEnum.CallOverlay;
+						asmInstruction.NearCall = true;
 						asmInstruction.Parameters.Clear();
 						asmInstruction.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Immediate, CPUParameterSizeEnum.UInt8, this.parentSegment.CPUOverlay));
 						asmInstruction.Parameters.Add(new CPUParameter(CPUParameterTypeEnum.Immediate, CPUParameterSizeEnum.UInt16, parameter.Value));
@@ -918,7 +922,9 @@ namespace Disassembler
 			#endregion
 
 			#region Convert Relative stack Memory addresses to local variables and parameters
-			for (int i = 0; i < this.asmInstructions.Count; i++)
+			// Runnable code keeps the frame in emulated memory: callers pass arguments on the
+			// stack and LEA takes addresses of locals, so they can't become C# variables.
+			for (int i = 0; i < this.asmInstructions.Count && !this.parentSegment.ParentProgram.Runnable; i++)
 			{
 				CPUInstruction instruction = this.asmInstructions[i];
 				CPUParameter parameter;
@@ -1770,11 +1776,98 @@ namespace Disassembler
 
 		public void WriteAsmCS(StreamWriter writer, int tabLevel, int verbosity)
 		{
+			if (this.parentSegment.ParentProgram.Runnable)
+			{
+				StringWriter text = new();
+				WriteAsmCSText(text, tabLevel, verbosity);
+				writer.Write(ToVCPUNames(text.ToString()));
+			}
+			else
+			{
+				WriteAsmCSText(writer, tabLevel, verbosity);
+			}
+		}
+
+		private static readonly Regex vcpuMethodName = new(@"\bthis\.oCPU\.([A-Za-z_]+?)(UInt8|UInt16|UInt32)\(", RegexOptions.Compiled);
+
+		/// <summary>
+		/// The templates name CPU methods mnemonic + size (ADDUInt16, REPE_MOVSUInt8); the VCPU
+		/// puts an underscore before the size (ADD_UInt16, REPE_MOVS_UInt8). Memory accessors
+		/// (ReadUInt16, WriteUInt8) are named the same in both.
+		/// </summary>
+		private static string ToVCPUNames(string code)
+		{
+			return vcpuMethodName.Replace(code, match =>
+			{
+				string name = match.Groups[1].Value;
+
+				if (name.StartsWith("Read") || name.StartsWith("Write") || name.EndsWith('_'))
+					return match.Value;
+
+				return $"this.oCPU.{name}_{match.Groups[2].Value}(";
+			});
+		}
+
+		/// <summary>
+		/// Runnable code keeps the return address on the emulated stack, so that [BP+n] finds
+		/// the arguments where the compiler put them. The caller pushes it, the callee's
+		/// RET/RETF pops it.
+		/// </summary>
+		private void WriteReturnAddressPush(TextWriter writer, int tabLevel, CPUInstruction instruction, bool far)
+		{
+			if (far)
+			{
+				writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PUSHUInt16(this.oCPU.CS.UInt16); // return segment");
+			}
+			writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PUSHUInt16(0x{instruction.Offset + instruction.Bytes.Count:x4}); // return offset");
+		}
+
+		/// <summary>
+		/// The return address and RET n arguments come off the stack without touching the
+		/// flags, as on the real CPU. Some callers test a flag the callee left them.
+		/// </summary>
+		private void WriteReturnPop(TextWriter writer, int tabLevel, CPUInstruction instruction, int returnAddressSize)
+		{
+			int size = instruction.TailCall ? 0 : returnAddressSize;
+
+			if (instruction.Parameters.Count > 0)
+			{
+				size += (int)instruction.Parameters[0].Value;
+			}
+
+			if (size > 0)
+			{
+				writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.SP.UInt16 = (ushort)(this.oCPU.SP.UInt16 + 0x{size:x});");
+			}
+		}
+
+		private void WriteAsmCSText(TextWriter writer, int tabLevel, int verbosity)
+		{
 			bool retInstruction = false;
+			bool runnable = this.parentSegment.ParentProgram.Runnable;
 
 			writer.WriteLine();
+
+			if (runnable)
+			{
+				// everything goes through registers and the emulated stack
+				writer.WriteLine($"{GetTabs(tabLevel)}public void {this.Name}()");
+				writer.WriteLine($"{GetTabs(tabLevel)}{{");
+			}
+			else
+			{
+				WriteSignature(writer, tabLevel);
+			}
+
+			writer.WriteLine($"{GetTabs(tabLevel + 1)}// This function is referenced {this.referenceFunctions.Count} time(s)");
+			WriteBody(writer, tabLevel, verbosity, runnable, ref retInstruction);
+			writer.WriteLine($"{GetTabs(tabLevel)}}}");
+		}
+
+		private void WriteSignature(TextWriter writer, int tabLevel)
+		{
 			writer.Write($"{GetTabs(tabLevel)}public {this.returnValue.ValueType.CSDeclaration} {this.Name}(");
-			
+
 			ILVariable[] parameters = this.localParameters.Values.ToArray();
 			Array.Sort(parameters, (item1, item2) => item1.Offset.CompareTo(item2.Offset));
 
@@ -1787,9 +1880,10 @@ namespace Disassembler
 
 			writer.WriteLine(")");
 			writer.WriteLine($"{GetTabs(tabLevel)}{{");
+		}
 
-			writer.WriteLine($"{GetTabs(tabLevel + 1)}// This function is referenced {this.referenceFunctions.Count} time(s)");
-
+		private void WriteBody(TextWriter writer, int tabLevel, int verbosity, bool runnable, ref bool retInstruction)
+		{
 			if (this.isLibraryFunction)
 			{
 				writer.WriteLine($"{GetTabs(tabLevel + 1)}// Will not disassemble library function at 0x{this.fnOffset:x}");
@@ -1925,7 +2019,7 @@ namespace Disassembler
 						case CPUInstructionEnum.CBW:
 							if (instruction.OperandSize == CPUParameterSizeEnum.UInt16)
 							{
-								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.CBW();");
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.CBW({(runnable ? "this.oCPU.AX" : "")});");
 							}
 							else
 							{
@@ -1936,7 +2030,7 @@ namespace Disassembler
 						case CPUInstructionEnum.CWD:
 							if (instruction.OperandSize == CPUParameterSizeEnum.UInt16)
 							{
-								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.CWD();");
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.CWD({(runnable ? "this.oCPU.AX, this.oCPU.DX" : "")});");
 							}
 							else
 							{
@@ -1980,7 +2074,21 @@ namespace Disassembler
 							break;
 
 						case CPUInstructionEnum.MUL:
-							if (instruction.OperandSize == CPUParameterSizeEnum.UInt8)
+							if (runnable)
+							{
+								// Parameters[1] is the implicit AX, the VCPU takes the registers and the operand
+								if (instruction.OperandSize == CPUParameterSizeEnum.UInt8)
+								{
+									writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.MULUInt8(this.oCPU.AX, " +
+										$"{instruction.Parameters[2].ToSourceCSTextMZ(instruction.OperandSize)});");
+								}
+								else
+								{
+									writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.MULUInt16(this.oCPU.DX, this.oCPU.AX, " +
+										$"{instruction.Parameters[2].ToSourceCSTextMZ(instruction.OperandSize)});");
+								}
+							}
+							else if (instruction.OperandSize == CPUParameterSizeEnum.UInt8)
 							{
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.{instruction.InstructionType.ToString()}{instruction.OperandSize.ToString()}" +
 									$"(this.oCPU.AX, {instruction.Parameters[1].ToSourceCSTextMZ(instruction.OperandSize)}," +
@@ -1998,7 +2106,27 @@ namespace Disassembler
 							parameter = instruction.Parameters[0];
 							writer.Write($"{GetTabs(tabLevel + 1)}");
 
-							if (parameter.Type == CPUParameterTypeEnum.Register)
+							if (runnable && parameter.Type == CPUParameterTypeEnum.Register)
+							{
+								if (parameter.RegisterValue == CPURegisterEnum.AX_DX)
+								{
+									writer.WriteLine("this.oCPU.IMULUInt16(this.oCPU.AX, this.oCPU.DX, " +
+										$"{instruction.Parameters[2].ToSourceCSTextMZ(instruction.OperandSize)});");
+								}
+								else if (parameter.RegisterValue == CPURegisterEnum.AX && instruction.OperandSize == CPUParameterSizeEnum.UInt8)
+								{
+									writer.WriteLine("this.oCPU.IMULUInt8(this.oCPU.AX, " +
+										$"{instruction.Parameters[2].ToSourceCSTextMZ(instruction.OperandSize)});");
+								}
+								else
+								{
+									// IMUL reg, r/m, imm keeps the low half only
+									writer.WriteLine(parameter.ToDestinationCSTextMZ(instruction.OperandSize,
+										$"this.oCPU.IMUL1_UInt16({instruction.Parameters[1].ToSourceCSTextMZ(instruction.OperandSize)}, " +
+										$"{instruction.Parameters[2].ToSourceCSTextMZ(instruction.OperandSize)})"));
+								}
+							}
+							else if (parameter.Type == CPUParameterTypeEnum.Register)
 							{
 								if (parameter.RegisterValue == CPURegisterEnum.AX_DX)
 								{
@@ -2102,11 +2230,39 @@ namespace Disassembler
 							break;
 
 						case CPUInstructionEnum.ENTER:
-							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.Enter();");
+							if (runnable)
+							{
+								// ENTER size, 0 is PUSH BP; MOV BP, SP; SUB SP, size, without the flags
+								if (instruction.Parameters.Count > 1 && instruction.Parameters[1].Value != 0)
+								{
+									throw new Exception($"ENTER with nesting level {instruction.Parameters[1].Value} in function " +
+										$"{this.parentSegment.Name}.{this.Name} at offset 0x{instruction.Offset:x4}");
+								}
+
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PUSHUInt16(this.oCPU.BP.UInt16);");
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.BP.UInt16 = this.oCPU.SP.UInt16;");
+
+								if (instruction.Parameters.Count > 0 && instruction.Parameters[0].Value != 0)
+								{
+									writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.SP.UInt16 = (ushort)(this.oCPU.SP.UInt16 - 0x{instruction.Parameters[0].Value:x});");
+								}
+							}
+							else
+							{
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.Enter();");
+							}
 							break;
 
 						case CPUInstructionEnum.LEAVE:
-							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.Leave();");
+							if (runnable)
+							{
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.SP.UInt16 = this.oCPU.BP.UInt16;");
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.BP.UInt16 = this.oCPU.POPUInt16();");
+							}
+							else
+							{
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.Leave();");
+							}
 							break;
 
 						// stack instructions
@@ -2307,6 +2463,7 @@ namespace Disassembler
 							parameter = instruction.Parameters[0];
 							writer.WriteLine($"{GetTabs(tabLevel + 1)}// IIf");
 							writer.WriteLine($"{GetTabs(tabLevel + 1)}{instruction.Parameters[0].ToSourceCSTextMZ(instruction.OperandSize)} = "+
+								(runnable ? (instruction.OperandSize == CPUParameterSizeEnum.UInt8 ? "(byte)" : "(ushort)") : "") +
 								$"((this.oCPU.Flags.{((CPUJumpConditionEnum)instruction.Parameters[1].Value).ToString()}) ? " +
 								$"{instruction.Parameters[2].ToSourceCSTextMZ(instruction.OperandSize)} : {instruction.Parameters[3].ToSourceCSTextMZ(instruction.OperandSize)});");
 							break;
@@ -2416,7 +2573,11 @@ namespace Disassembler
 
 						case CPUInstructionEnum.CALL:
 							parameter = instruction.Parameters[0];
-							if (verbosity > 0)
+							if (runnable)
+							{
+								WriteReturnAddressPush(writer, tabLevel, instruction, false);
+							}
+							else if (verbosity > 0)
 							{
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PushUInt16(0x{instruction.Offset + instruction.Bytes.Count:x4}); // stack management - push return offset");
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}// Instruction address 0x{instruction.Segment:x4}:0x{instruction.Offset:x4}, size: {instruction.Bytes.Count}");
@@ -2484,7 +2645,7 @@ namespace Disassembler
 							}
 
 							// all calls in medium memory model are far
-							if (verbosity > 0)
+							if (!runnable && verbosity > 0)
 							{
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PopUInt16(); // stack management - pop return offset");
 								//writer.WriteLine("{GetTabs(tabLevel)+1}this.oCPU.CS.UInt16 = 0x{0:x4}; // restore this function segment", function.Segment);
@@ -2493,7 +2654,18 @@ namespace Disassembler
 
 						case CPUInstructionEnum.CALLF:
 							parameter = instruction.Parameters[0];
-							if (verbosity > 0)
+							if (runnable)
+							{
+								if (instruction.TailCall)
+								{
+									writer.WriteLine($"{GetTabs(tabLevel + 1)}// tail call, the target returns to our caller");
+								}
+								else
+								{
+									WriteReturnAddressPush(writer, tabLevel, instruction, true);
+								}
+							}
+							else if (verbosity > 0)
 							{
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PushUInt16(this.oCPU.CS.UInt16); // stack management - push return segment");
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PushUInt16(0x{instruction.Offset + instruction.Bytes.Count:x4}); // stack management - push return offset");
@@ -2559,8 +2731,8 @@ namespace Disassembler
 							{
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.CallUInt32(this.oCPU.ReadUInt32({parameter.GetSegmentTextMZ()}, {parameter.ToCSTextMZ(instruction.OperandSize)}));");
 							}
-							
-							if (verbosity > 0)
+
+							if (!runnable && verbosity > 0)
 							{
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PopUInt32(); // stack management - pop return offset and segment");
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.CS.UInt16 = 0x{this.parentSegment.CPUSegment:x4}; // restore this function segment");
@@ -2569,7 +2741,19 @@ namespace Disassembler
 
 						case CPUInstructionEnum.CallOverlay:
 							writer.WriteLine($"{GetTabs(tabLevel + 1)}// Call to overlay");
-							if (verbosity > 0)
+							if (runnable)
+							{
+								// far through a thunk, near when it was a CALL inside the overlay
+								if (instruction.TailCall)
+								{
+									writer.WriteLine($"{GetTabs(tabLevel + 1)}// tail call, the target returns to our caller");
+								}
+								else
+								{
+									WriteReturnAddressPush(writer, tabLevel, instruction, !instruction.NearCall);
+								}
+							}
+							else if (verbosity > 0)
 							{
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PushUInt16(this.oCPU.CS.UInt16); // stack management - push return segment");
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PushUInt16(0x{instruction.Offset + instruction.Bytes.Count:x4}); // stack management - push return offset");
@@ -2609,7 +2793,7 @@ namespace Disassembler
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}// unresolved call to F{instruction.Parameters[0].Value}_0000_{instruction.Parameters[1].Value:x4}");
 							}
 
-							if (verbosity > 0)
+							if (!runnable && verbosity > 0)
 							{
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.PopUInt32(); // stack management - pop return offset and segment");
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.CS.UInt16 = 0x{this.parentSegment.CPUSegment:x4}; // restore this function segment");
@@ -2619,7 +2803,11 @@ namespace Disassembler
 						case CPUInstructionEnum.RET:
 							writer.WriteLine();
 							writer.WriteLine($"{GetTabs(tabLevel + 1)}// Near return");
-							if (instruction.Parameters.Count > 0)
+							if (runnable)
+							{
+								WriteReturnPop(writer, tabLevel, instruction, 2);
+							}
+							else if (instruction.Parameters.Count > 0)
 							{
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.SP.UInt16 = this.oCPU.ADDUInt16(this.oCPU.SP.UInt16, 0x{instruction.Parameters[0].Value:x});");
 							}
@@ -2634,7 +2822,11 @@ namespace Disassembler
 						case CPUInstructionEnum.RETF:
 							writer.WriteLine();
 							writer.WriteLine($"{GetTabs(tabLevel + 1)}// Far return");
-							if (instruction.Parameters.Count > 0)
+							if (runnable)
+							{
+								WriteReturnPop(writer, tabLevel, instruction, 4);
+							}
+							else if (instruction.Parameters.Count > 0)
 							{
 								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.SP.UInt16 = this.oCPU.ADDUInt16(this.oCPU.SP.UInt16, 0x{instruction.Parameters[0].Value:x});");
 							}
@@ -2649,6 +2841,11 @@ namespace Disassembler
 						case CPUInstructionEnum.IRET:
 							writer.WriteLine();
 							writer.WriteLine($"{GetTabs(tabLevel + 1)}// IRET - Pop flags and Far return");
+							if (runnable)
+							{
+								WriteReturnPop(writer, tabLevel, instruction, 4);
+								writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.POPFUInt16();");
+							}
 							writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.Log.ExitBlock(\"'{this.Name}'\");");
 							if (k != this.asmInstructions.Count - 1)
 							{
@@ -2688,8 +2885,6 @@ namespace Disassembler
 					writer.WriteLine($"{GetTabs(tabLevel + 1)}this.oCPU.Log.ExitBlock(\"'{this.Name}'\");");
 				}
 			}
-
-			writer.WriteLine($"{GetTabs(tabLevel)}}}");
 		}
 
 		public static string ConditionToCSText(CPUJumpConditionEnum condition)
