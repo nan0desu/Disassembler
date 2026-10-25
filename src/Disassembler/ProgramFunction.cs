@@ -1984,7 +1984,7 @@ namespace Disassembler
 
 				if (segmentWord != null)
 				{
-					segmentWord.Value = (ushort)(segmentWord.Value + MainProgram.LoadSegment);
+					segmentWord.Value = (ushort)(segmentWord.Value + this.parentSegment.ParentProgram.LoadSegment);
 				}
 				else
 				{
@@ -3461,7 +3461,7 @@ namespace Disassembler
 
 						if (this.parentSegment.CPUOverlay == 0)
 						{
-							segment += MainProgram.LoadSegment;
+							segment += this.parentSegment.ParentProgram.LoadSegment;
 						}
 
 						return $"F{this.parentSegment.CPUOverlay}_{segment:x4}_{this.fnOffset:x4}";

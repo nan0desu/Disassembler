@@ -7,8 +7,11 @@ namespace Disassembler
 {
 	public class MainProgram
 	{
-		// the segment the executable is loaded at, as in OpenCiv1
-		public const ushort LoadSegment = 0x1000;
+		/// <summary>
+		/// The segment the executable is loaded at: 0x1000 as in OpenCiv1, or wherever the host puts a
+		/// sound driver
+		/// </summary>
+		public ushort LoadSegment { get; set; } = 0x1000;
 
 		// base types
 		private ILValueType voidValueType = ILValueType.Void;

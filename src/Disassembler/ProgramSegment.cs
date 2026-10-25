@@ -185,7 +185,7 @@ namespace Disassembler
 					}
 					else
 					{
-						return $"Segment_{this.CPUSegment + MainProgram.LoadSegment:x4}";
+						return $"Segment_{this.CPUSegment + this.parentProgram.LoadSegment:x4}";
 					}
 				}
 
