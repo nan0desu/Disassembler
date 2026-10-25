@@ -132,6 +132,9 @@ internal class Program
 
 		if (runnable)
 		{
+			// OpenColo loads the Roland driver itself, at the top of conventional memory
+			ProcessSoundDriverRunnable("RSOUND.COL", "RSound", 0x9400, codePath);
+
 			Console.WriteLine("Processing finished");
 			return;
 		}
@@ -1216,6 +1219,84 @@ internal class Program
 
 			return null;
 		}
+	}
+
+	/// <summary>
+	/// A sound driver as runnable code for OpenColo. The host loads the driver image at
+	/// loadSegment and relocates it like INT 21h/4B03h would, so the segments in the code are
+	/// fixed at that address. The entry points are the offsets at 32h of the image.
+	/// </summary>
+	private static void ProcessSoundDriverRunnable(string fileName, string name, ushort loadSegment, string codePath)
+	{
+		Console.WriteLine("* Processing sound driver {0}", fileName);
+
+		try
+		{
+			MZExecutable driverEXE = new(string.Format("GameSRC{0}COLONIZE{0}{1}",
+				Path.DirectorySeparatorChar, fileName));
+
+			MainProgram driver = new(driverEXE, [], 0);
+			driver.AddressNames = true;
+			driver.Runnable = true;
+			driver.Namespace = "OpenColo";
+			driver.ParentClass = "OpenColoGame";
+			driver.LoadSegment = loadSegment;
+
+			driver.DisassembleOverlay();
+
+			foreach (ushort offset in SoundDriverCodePointers(driverEXE))
+			{
+				driver.Disassemble(0, 0, offset, null);
+			}
+
+			driver.AssignOrdinals();
+
+			foreach (ProgramSegment segment in driver.Segments.Values)
+			{
+				segment.Name = segment.CPUSegment == 0 ? name : $"{name}_{segment.CPUSegment:x4}";
+				segment.WriteAsmCS(codePath, 0);
+			}
+
+			driver.WriteDriverCS(codePath, name);
+
+			Console.WriteLine("{0}: {1} functions at {2:x4}:0000", name,
+				driver.Segments.Values.Sum(segment => segment.Functions.Count), loadSegment);
+		}
+		catch (Exception ex)
+		{
+			Console.WriteLine($"Warning: {fileName} disassembly failed: {ex.Message}");
+
+			if (ex.GetType() != typeof(Exception))
+			{
+				Console.WriteLine(ex.StackTrace);
+			}
+		}
+	}
+
+	/// <summary>
+	/// Code in RSOUND.COL that is only reached through a pointer, which the disassembly can't
+	/// follow:
+	/// - the request handlers, called through four tables by the request entry (09c6): commands
+	///   from 0, music from 20h, effects from 40h and 8020h-8026h, each with its highest request
+	///   number in a word next to the tables;
+	/// - the routines the music data calls (opcode C4 and a word, handled at 17f4): 2c8c, 2d26;
+	/// - the routines music handler 2c08 leaves in [91A] for the tick (2ac8) to call: 2c48, 2c6a.
+	/// </summary>
+	private static List<ushort> SoundDriverCodePointers(MZExecutable driverEXE)
+	{
+		List<ushort> offsets = [0x2c8c, 0x2d26, 0x2c48, 0x2c6a];
+
+		foreach ((int table, int limit, int first) in new[] { (0x2afd, 0x3c4c, 0), (0x2b0f, 0x3c4e, 0x20), (0x2b53, 0x3c50, 0x8020), (0x2b63, 0x3c52, 0x40) })
+		{
+			int count = driverEXE.ReadUInt16(limit) - first + 1;
+
+			for (int i = 0; i < count; i++)
+			{
+				offsets.Add(driverEXE.ReadUInt16(table + i * 2));
+			}
+		}
+
+		return offsets;
 	}
 
 	/// <summary>

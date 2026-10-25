@@ -180,6 +180,60 @@ namespace Disassembler
 			writer.WriteLine("}");
 		}
 
+		/// <summary>
+		/// For a sound driver, which is loaded at run time and isn't in the dispatch table of the
+		/// main program: a parent class half with a field for the driver's code and a method that
+		/// creates it and registers its functions in Dispatch.Native, by run time address.
+		/// </summary>
+		public void WriteDriverCS(string path, string name)
+		{
+			List<(uint Address, string Function)> entries = new();
+
+			foreach (ProgramSegment segment in this.segments.Values)
+			{
+				uint segmentBase = (uint)RuntimeSegment(segment) << 4;
+
+				foreach (ProgramFunction function in segment.Functions.Values)
+				{
+					if (!function.DisassemblyFailed)
+						entries.Add((segmentBase + function.FunctionOffset, $"this.{segment.Name}.{function.Name}"));
+				}
+			}
+
+			entries.Sort();
+
+			using StreamWriter writer = new(Path.Combine(path, $"{this.ParentClass}{name}.cs"));
+
+			writer.WriteLine($"namespace {this.Namespace}");
+			writer.WriteLine("{");
+			writer.WriteLine($"\tpublic partial class {this.ParentClass}");
+			writer.WriteLine("\t{");
+
+			foreach (ProgramSegment segment in this.segments.Values)
+			{
+				writer.WriteLine($"\t\tpublic {segment.Name} {segment.Name};");
+			}
+
+			writer.WriteLine();
+			writer.WriteLine($"\t\t/// <summary>The code of the driver loaded at {this.LoadSegment:x4}:0000, {entries.Count} functions</summary>");
+			writer.WriteLine($"\t\tpublic void Create{name}()");
+			writer.WriteLine("\t\t{");
+
+			foreach (ProgramSegment segment in this.segments.Values)
+			{
+				writer.WriteLine($"\t\t\tthis.{segment.Name} = new {segment.Name}(this);");
+			}
+
+			foreach ((uint address, string function) in entries)
+			{
+				writer.WriteLine($"\t\t\tthis.Dispatch.Native[0x{address:x5}] = {function};");
+			}
+
+			writer.WriteLine("\t\t}");
+			writer.WriteLine("\t}");
+			writer.WriteLine("}");
+		}
+
 		public void WriteDispatchCS(string path)
 		{
 			SortedDictionary<uint, string> entries = new();
